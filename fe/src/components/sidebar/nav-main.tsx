@@ -9,16 +9,21 @@ import type { AppNavRoute } from "#/config/app-navigation";
 import { cn } from "#/lib/utils";
 
 function isRouteActive(pathname: string, route: AppNavRoute): boolean {
-	if (route.exact) {
-		return pathname === route.to;
-	}
-	return pathname === route.to || pathname.startsWith(`${route.to}/`);
+	return route.exact
+		? pathname === route.to
+		: pathname === route.to || pathname.startsWith(`${route.to}/`);
 }
 
-export function DashboardNavigation({ routes }: { routes: AppNavRoute[] }) {
+export default function DashboardNavigation({
+	routes,
+}: {
+	routes: AppNavRoute[];
+}) {
 	const { state } = useSidebar();
+	const pathname = useRouterState({
+		select: (router) => router.location.pathname,
+	});
 	const isCollapsed = state === "collapsed";
-	const pathname = useRouterState({ select: (s) => s.location.pathname });
 
 	return (
 		<nav aria-label="Main">
@@ -26,22 +31,17 @@ export function DashboardNavigation({ routes }: { routes: AppNavRoute[] }) {
 				{routes.map((route) => {
 					const Icon = route.icon;
 					const isActive = isRouteActive(pathname, route);
+
 					return (
 						<SidebarMenuItem key={route.id}>
-							<SidebarMenuButton
-								asChild
-								isActive={isActive}
-								tooltip={route.title}
-							>
+							<SidebarMenuButton asChild tooltip={route.title}>
 								<Link
 									to={route.to}
 									data-active={isActive ? "true" : undefined}
 									className={cn(
-										"flex items-center text-sidebar-foreground/80 transition-colors",
+										"flex items-center rounded-lg px-2 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
 										isActive &&
 											"bg-sidebar-accent font-medium text-sidebar-accent-foreground",
-										!isActive &&
-											"hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
 										isCollapsed && "justify-center",
 									)}
 								>
