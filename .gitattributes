@@ -1,0 +1,13 @@
+# Normalise line endings so Windows and macOS checkouts are byte-identical and
+# formatters (Biome, Ruff) agree with CI. Binary files are detected automatically;
+# the explicit entries are belt and braces.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.pyc binary
