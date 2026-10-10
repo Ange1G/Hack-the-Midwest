@@ -15,10 +15,9 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    command: `npx vite dev --port ${port}`,
+    command: `npx vite dev --port ${port} --mode mock`,
     url: baseURL,
     reuseExistingServer: false,
-    env: { VITE_USE_MOCKS: 'true' },
     timeout: 120_000,
   },
 })
