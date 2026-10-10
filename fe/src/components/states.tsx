@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Alert, AlertDescription, AlertTitle } from "#/components/ui/alert";
+import { Notice } from "#/components/notice";
 import { Button } from "#/components/ui/button";
 import { Skeleton } from "#/components/ui/skeleton";
 
@@ -26,23 +26,20 @@ export function ErrorState({
 	const message =
 		error instanceof Error ? error.message : "Something unexpected happened.";
 	return (
-		<Alert variant="destructive">
-			<AlertTitle>{title}</AlertTitle>
-			<AlertDescription>
-				<p>{message}</p>
-				{onRetry ? (
-					<Button
-						type="button"
-						variant="outline"
-						size="sm"
-						className="mt-2"
-						onClick={onRetry}
-					>
-						Try again
-					</Button>
-				) : null}
-			</AlertDescription>
-		</Alert>
+		<Notice tone="danger" title={title}>
+			<p>{message}</p>
+			{onRetry ? (
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					className="mt-2"
+					onClick={onRetry}
+				>
+					Try again
+				</Button>
+			) : null}
+		</Notice>
 	);
 }
 

@@ -1,23 +1,17 @@
 import { Link } from "@tanstack/react-router";
+import { DataTable, type DataTableColumn } from "#/components/data-table";
 import { PageHeader } from "#/components/layout/page";
+import { Notice } from "#/components/notice";
 import { EmptyState, ErrorState, LoadingState } from "#/components/states";
 import { StatusBadge } from "#/components/status-badge";
-import { Alert, AlertDescription, AlertTitle } from "#/components/ui/alert";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "#/components/ui/card";
-import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
-} from "#/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { useAgent, useAgentRuns, useStartRun } from "#/lib/api/queries";
 import type { Run } from "#/lib/api/schemas";
 import { formatDateTime, formatDuration } from "#/lib/format";
+import { textLinkClass } from "#/lib/styles";
 import { toolKey } from "#/lib/tools";
 
 export function AgentDetail({
@@ -66,19 +60,25 @@ export function AgentDetail({
 			/>
 
 			{data.flagged ? (
-				<Alert variant="destructive" className="mb-6">
-					<AlertTitle>Flagged by the security monitor</AlertTitle>
-					<AlertDescription>
+				<Notice
+					tone="danger"
+					className="mb-6"
+					title="Flagged by the security monitor"
+				>
+					<p>
 						A run of this agent was terminated for a policy violation. See the{" "}
-						<Link to="/security">Security</Link> page for the finding.
-					</AlertDescription>
-				</Alert>
+						<Link to="/security" className={textLinkClass}>
+							Security
+						</Link>{" "}
+						page for the finding.
+					</p>
+				</Notice>
 			) : null}
 
 			{startRun.error ? (
-				<p role="alert" className="mb-4 text-sm text-destructive">
-					{startRun.error.message}
-				</p>
+				<Notice tone="danger" className="mb-4" title="Could not start the run">
+					<p>{startRun.error.message}</p>
+				</Notice>
 			) : null}
 
 			<Tabs defaultValue="overview">
@@ -134,6 +134,49 @@ export function AgentDetail({
 	);
 }
 
+const runColumns: DataTableColumn<Run>[] = [
+	{
+		id: "status",
+		accessorFn: (run) => run.status,
+		header: "Status",
+		cell: ({ row }) => <StatusBadge status={row.original.status} />,
+	},
+	{
+		id: "started",
+		accessorFn: (run) => run.started_at ?? run.created_at,
+		header: "Started",
+		cell: ({ row }) => (
+			<span className="text-sm text-muted-foreground">
+				{formatDateTime(row.original.started_at ?? row.original.created_at)}
+			</span>
+		),
+	},
+	{
+		id: "duration",
+		header: "Duration",
+		enableSorting: false,
+		cell: ({ row }) => (
+			<span className="text-sm text-muted-foreground">
+				{formatDuration(row.original.started_at, row.original.finished_at)}
+			</span>
+		),
+	},
+	{
+		id: "actions",
+		header: () => <span className="sr-only">Actions</span>,
+		enableSorting: false,
+		cell: ({ row }) => (
+			<Link
+				to="/runs/$runId"
+				params={{ runId: row.original.id }}
+				className={textLinkClass}
+			>
+				View
+			</Link>
+		),
+	},
+];
+
 function AgentRuns({ agentId }: { agentId: string }) {
 	const runs = useAgentRuns(agentId);
 
@@ -159,35 +202,10 @@ function AgentRuns({ agentId }: { agentId: string }) {
 	}
 
 	return (
-		<Table>
-			<TableHeader>
-				<TableRow>
-					<TableHead>Status</TableHead>
-					<TableHead>Started</TableHead>
-					<TableHead>Duration</TableHead>
-					<TableHead />
-				</TableRow>
-			</TableHeader>
-			<TableBody>
-				{runs.data.map((run) => (
-					<TableRow key={run.id}>
-						<TableCell>
-							<StatusBadge status={run.status} />
-						</TableCell>
-						<TableCell className="text-sm text-muted-foreground">
-							{formatDateTime(run.started_at ?? run.created_at)}
-						</TableCell>
-						<TableCell className="text-sm text-muted-foreground">
-							{formatDuration(run.started_at, run.finished_at)}
-						</TableCell>
-						<TableCell className="text-right">
-							<Link to="/runs/$runId" params={{ runId: run.id }}>
-								View
-							</Link>
-						</TableCell>
-					</TableRow>
-				))}
-			</TableBody>
-		</Table>
+		<DataTable
+			columns={runColumns}
+			data={runs.data}
+			caption="Runs of this agent"
+		/>
 	);
 }

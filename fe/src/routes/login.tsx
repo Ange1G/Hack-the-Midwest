@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { AuthLayout } from "#/components/auth/auth-layout";
 import { LoginForm } from "#/components/auth/login-form";
 import { ensureMocksReady } from "#/lib/mocks-ready";
+import { textLinkClass } from "#/lib/styles";
 import { DEMO_EMAIL, DEMO_PASSWORD } from "#/mocks/demo-account";
 
 export const Route = createFileRoute("/login")({
@@ -18,7 +19,10 @@ function LoginPage() {
 			description="Build, run, and monitor your own agents."
 			footer={
 				<p>
-					New here? <Link to="/signup">Create an account</Link>
+					New here?{" "}
+					<Link to="/signup" className={textLinkClass}>
+						Create an account
+					</Link>
 				</p>
 			}
 		>

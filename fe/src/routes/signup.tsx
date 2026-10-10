@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { AuthLayout } from "#/components/auth/auth-layout";
 import { SignupForm } from "#/components/auth/signup-form";
 import { ensureMocksReady } from "#/lib/mocks-ready";
+import { textLinkClass } from "#/lib/styles";
 
 export const Route = createFileRoute("/signup")({
 	ssr: false,
@@ -17,7 +18,10 @@ function SignupPage() {
 			description="Your agents, tools, and credentials stay private to you."
 			footer={
 				<p>
-					Already have an account? <Link to="/login">Sign in</Link>
+					Already have an account?{" "}
+					<Link to="/login" className={textLinkClass}>
+						Sign in
+					</Link>
 				</p>
 			}
 		>

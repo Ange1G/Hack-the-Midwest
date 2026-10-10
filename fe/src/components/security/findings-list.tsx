@@ -1,31 +1,105 @@
 import { Link } from "@tanstack/react-router";
+import { DataTable, type DataTableColumn } from "#/components/data-table";
 import { EmptyState, ErrorState, LoadingState } from "#/components/states";
-import { Badge } from "#/components/ui/badge";
-import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
-} from "#/components/ui/table";
+import { type Tone, ToneBadge } from "#/components/tone-badge";
 import { useAgents, useFindings } from "#/lib/api/queries";
 import type { Finding } from "#/lib/api/schemas";
 import { formatDateTime } from "#/lib/format";
+import { textLinkClass } from "#/lib/styles";
 
-const severityVariant: Record<
-	Finding["severity"],
-	"default" | "secondary" | "destructive" | "outline"
-> = {
-	low: "outline",
-	medium: "secondary",
-	high: "destructive",
-	critical: "destructive",
+type FindingRow = Finding & { agent_name: string };
+
+const severityRank: Record<Finding["severity"], number> = {
+	low: 0,
+	medium: 1,
+	high: 2,
+	critical: 3,
+};
+
+const severityTone: Record<Finding["severity"], Tone> = {
+	low: "neutral",
+	medium: "warning",
+	high: "danger",
+	critical: "danger",
 };
 
 function capitalize(value: string): string {
 	return value.charAt(0).toUpperCase() + value.slice(1);
 }
+
+const columns: DataTableColumn<FindingRow>[] = [
+	{
+		id: "severity",
+		accessorFn: (finding) => severityRank[finding.severity],
+		header: "Severity",
+		cell: ({ row }) => (
+			<ToneBadge tone={severityTone[row.original.severity]}>
+				{capitalize(row.original.severity)}
+			</ToneBadge>
+		),
+	},
+	{
+		id: "rule",
+		accessorFn: (finding) => finding.rule,
+		header: "Rule",
+		cell: ({ row }) => (
+			<>
+				<code>{row.original.rule}</code>
+				<p className="mt-1 max-w-md text-xs text-muted-foreground">
+					{row.original.message}
+				</p>
+			</>
+		),
+	},
+	{
+		id: "agent",
+		accessorFn: (finding) => finding.agent_name,
+		header: "Agent",
+		cell: ({ row }) => (
+			<Link
+				to="/agents/$agentId"
+				params={{ agentId: row.original.agent_id }}
+				className={textLinkClass}
+			>
+				{row.original.agent_name}
+			</Link>
+		),
+	},
+	{
+		id: "action",
+		accessorFn: (finding) => finding.action,
+		header: "Action",
+		cell: ({ row }) => (
+			<ToneBadge tone={row.original.action === "killed" ? "danger" : "warning"}>
+				{capitalize(row.original.action)}
+			</ToneBadge>
+		),
+	},
+	{
+		id: "created_at",
+		accessorFn: (finding) => finding.created_at,
+		header: "When",
+		cell: ({ row }) => (
+			<span className="text-sm text-muted-foreground">
+				{formatDateTime(row.original.created_at)}
+			</span>
+		),
+	},
+	{
+		id: "actions",
+		header: () => <span className="sr-only">Actions</span>,
+		enableSorting: false,
+		cell: ({ row }) => (
+			<Link
+				to="/runs/$runId"
+				params={{ runId: row.original.run_id }}
+				className={textLinkClass}
+			>
+				View run
+			</Link>
+		),
+	},
+];
 
 export function FindingsList() {
 	const findings = useFindings();
@@ -52,63 +126,19 @@ export function FindingsList() {
 		);
 	}
 
-	const agentName = (id: string) =>
-		agents.data?.find((agent) => agent.id === id)?.name ?? id;
+	const rows: FindingRow[] = findings.data.map((finding) => ({
+		...finding,
+		agent_name:
+			agents.data?.find((agent) => agent.id === finding.agent_id)?.name ??
+			finding.agent_id,
+	}));
 
 	return (
-		<Table>
-			<TableHeader>
-				<TableRow>
-					<TableHead>Severity</TableHead>
-					<TableHead>Rule</TableHead>
-					<TableHead>Agent</TableHead>
-					<TableHead>Action</TableHead>
-					<TableHead>When</TableHead>
-					<TableHead />
-				</TableRow>
-			</TableHeader>
-			<TableBody>
-				{findings.data.map((finding) => (
-					<TableRow key={finding.id}>
-						<TableCell>
-							<Badge variant={severityVariant[finding.severity]}>
-								{capitalize(finding.severity)}
-							</Badge>
-						</TableCell>
-						<TableCell>
-							<code>{finding.rule}</code>
-							<p className="mt-1 max-w-md text-xs text-muted-foreground">
-								{finding.message}
-							</p>
-						</TableCell>
-						<TableCell>
-							<Link
-								to="/agents/$agentId"
-								params={{ agentId: finding.agent_id }}
-							>
-								{agentName(finding.agent_id)}
-							</Link>
-						</TableCell>
-						<TableCell>
-							<Badge
-								variant={
-									finding.action === "killed" ? "destructive" : "secondary"
-								}
-							>
-								{capitalize(finding.action)}
-							</Badge>
-						</TableCell>
-						<TableCell className="text-sm text-muted-foreground">
-							{formatDateTime(finding.created_at)}
-						</TableCell>
-						<TableCell className="text-right">
-							<Link to="/runs/$runId" params={{ runId: finding.run_id }}>
-								View run
-							</Link>
-						</TableCell>
-					</TableRow>
-				))}
-			</TableBody>
-		</Table>
+		<DataTable
+			columns={columns}
+			data={rows}
+			caption="Security findings"
+			initialSorting={[{ id: "severity", desc: true }]}
+		/>
 	);
 }

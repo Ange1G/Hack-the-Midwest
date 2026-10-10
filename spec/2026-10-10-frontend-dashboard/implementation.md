@@ -2,7 +2,8 @@
 
 Feature: `spec/2026-10-10-frontend-dashboard/task.md`
 Branch: `feat/frontend-dashboard`
-Status: skeleton complete, awaiting styling pass and the real API (2026-10-10)
+Status: skeleton complete and revised after backend-owner review; awaiting styling
+pass and alignment with the real API (2026-10-10)
 
 ## Progress log
 
@@ -18,6 +19,11 @@ Status: skeleton complete, awaiting styling pass and the real API (2026-10-10)
   killed-state banner, findings list.
 - 2026-10-10 16:05: Playwright demo-flow test (step 6) passing in mock mode.
   Lint, typecheck and all tests green (step 7).
+- 2026-10-10 17:30: review round from the backend owner applied: TanStack Table
+  for every data table, contrast-safe badges and notices, an automated WCAG AA
+  scan in Playwright, and a check that components use only `:root` variables.
+  Root `.gitignore` added; committed artifacts untracked. `main` merged
+  (FastAPI agents scaffold).
 
 ## Decisions made during implementation
 
@@ -52,14 +58,48 @@ Status: skeleton complete, awaiting styling pass and the real API (2026-10-10)
   `npm run check` passes (acceptance criterion AC1). One `biome-ignore` was added in
   `slider.tsx` for a positional key, with the reason in the comment.
 
-## Test results (observed 2026-10-10 16:05, Windows 11, Node 24)
+## Review round (backend owner feedback, 2026-10-10)
+
+Feedback: use TanStack Table rather than hand-written tables; buttons, badges and
+icons must have accessible contrast (check with browser accessibility tooling);
+components must use the CSS variables declared on `:root` in `styles.css`; the
+navigation bar is styled by the backend owner and is not to be changed.
+
+- **TanStack Table v9** (`@tanstack/react-table`) behind one `DataTable`
+  component (`src/components/data-table.tsx`): sortable column headers with
+  `aria-sort`, a screen-reader caption, and an empty row. The agents list, the
+  agent's run history, and the findings list define plain column objects and
+  read values from `row.original`, which keeps the per-column generics simple.
+  v9's API differs from v8 (`useTable`, `tableFeatures`, explicit `sortFns`);
+  it was read from the installed type definitions, not from memory.
+- **Contrast** is checked automatically: `e2e/a11y.spec.ts` runs axe-core (the
+  engine behind Lighthouse's accessibility audit) with the WCAG 2.1 AA rule set on
+  login, signup, agents list, builder, agent detail, a killed run, and the
+  security page, and fails on any serious or critical violation. The navigation
+  bar (`aside`) is excluded from the assertion because it is owned elsewhere.
+- Findings from the first scan, all fixed: white-on-colour badges fell below
+  4.5:1 with this palette (secondary teal 2.5:1, destructive 3.4:1); the global
+  `a` colour (`--lagoon-deep`, #328f97) is 3.8:1 on white; and because that
+  global rule is unlayered it also overrode the white text inside primary
+  buttons rendered as links (teal on violet, 1.7:1). Badges and notices now keep
+  text in `--foreground` on a light tint of a `:root` colour (`ToneBadge`,
+  `Notice`); app links use `textLinkClass` / `buttonLinkClass` from
+  `src/lib/styles.ts`. The global `a` colour itself is reported to the owner of
+  `styles.css` rather than changed here.
+- **`:root` variables**: a search of `src/components` (excluding `ui/`) for hex
+  colours or Tailwind palette classes found none; every colour resolves to a
+  variable in `styles.css`, either through the shadcn theme mapping or directly
+  via `(--name)` utilities.
+- `app-shell.tsx` was not modified in this round.
+
+## Test results (observed 2026-10-10 17:30, Windows 11, Node 24)
 
 | Check | Result |
 |---|---|
 | `npm run typecheck` | pass |
-| `npm run check` (Biome, 72 files) | 0 errors, 1 info |
-| `npm test` (Vitest) | 12 files, 56 tests, all pass |
-| `npm run test:e2e` (Playwright, chromium) | 2 tests, all pass (demo flow 14.7 s) |
+| `npm run check` (Biome, 79 files) | 0 errors, 1 info |
+| `npm test` (Vitest) | 14 files, 62 tests, all pass |
+| `npm run test:e2e` (Playwright, chromium) | 4 tests, all pass: demo flow 15.8 s, redirect, two WCAG AA scans across 7 screens |
 
 Acceptance criteria: AC1 to AC7 all satisfied by the above. AC2, AC3, AC4, AC5 and
 AC6 are exercised directly by `e2e/demo-flow.spec.ts` plus the component suites;
@@ -78,9 +118,21 @@ page component.
 
 ## Known limitations and follow-ups
 
-- Mock mode stands in for the backend. The contract in `plan.md` is still a
-  proposal; once the API exists, `src/lib/api/schemas.ts` and `client.ts` are the
-  only files that should need to change for shape or path differences.
+- **Contract divergence.** The backend scaffold merged from `main`
+  (`spec/2026-10-10-fastapi-agents-scaffold`) defines a different contract from
+  `plan.md`: responses wrapped in `{ data, error, metadata, pagination }`, base
+  path `/api/v1`, development auth via an `X-Dev-User-SSO` header instead of
+  login, `GET /api/v1/agents/{user_sso}` with `page`/`page_size`, and an agent
+  shaped as `title`, `system_prompt`, `configurations`, schedule fields. Only
+  list-agents exists so far. Recommended next step: adopt the envelope, base
+  path, header auth and field names in `schemas.ts`/`client.ts`/`queries.ts`,
+  keep runs and findings on the mock until those endpoints exist. Decision
+  pending with the backend owner.
+- The global `a` colour in `styles.css` (`--lagoon-deep`) is 3.8:1 on the light
+  surfaces; app links override it locally. Raising the token's contrast globally
+  is the owner's call.
+- Mock mode stands in for the backend. `src/lib/api/schemas.ts` and `client.ts`
+  are the only files that should need to change for shape or path differences.
 - Open decisions for the backend owner remain as listed in `task.md`: cookie
   versus bearer auth, final endpoint shapes, polling versus server-sent events,
   and whether the monitoring agents are in scope for the demo.

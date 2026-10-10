@@ -1,15 +1,13 @@
-import { Badge } from "#/components/ui/badge";
 import type { RunStatus } from "#/lib/api/schemas";
+import { type Tone, ToneBadge } from "./tone-badge";
 
-type Variant = "default" | "secondary" | "destructive" | "outline";
-
-const presentation: Record<RunStatus, { label: string; variant: Variant }> = {
-	queued: { label: "Queued", variant: "outline" },
-	running: { label: "Running", variant: "secondary" },
-	succeeded: { label: "Succeeded", variant: "default" },
-	failed: { label: "Failed", variant: "destructive" },
-	killed: { label: "Killed", variant: "destructive" },
-	cancelled: { label: "Cancelled", variant: "outline" },
+const presentation: Record<RunStatus, { label: string; tone: Tone }> = {
+	queued: { label: "Queued", tone: "neutral" },
+	running: { label: "Running", tone: "info" },
+	succeeded: { label: "Succeeded", tone: "success" },
+	failed: { label: "Failed", tone: "danger" },
+	killed: { label: "Killed", tone: "danger" },
+	cancelled: { label: "Cancelled", tone: "neutral" },
 };
 
 export function statusLabel(status: RunStatus): string {
@@ -17,6 +15,6 @@ export function statusLabel(status: RunStatus): string {
 }
 
 export function StatusBadge({ status }: { status: RunStatus }) {
-	const { label, variant } = presentation[status];
-	return <Badge variant={variant}>{label}</Badge>;
+	const { label, tone } = presentation[status];
+	return <ToneBadge tone={tone}>{label}</ToneBadge>;
 }

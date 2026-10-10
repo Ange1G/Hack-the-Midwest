@@ -1,4 +1,4 @@
-import { Alert, AlertDescription, AlertTitle } from "#/components/ui/alert";
+import { Notice } from "#/components/notice";
 import { Button } from "#/components/ui/button";
 import { API_BASE_URL, ApiError } from "#/lib/api/client";
 
@@ -18,30 +18,31 @@ export function ApiUnavailable({
 
 	return (
 		<main className="flex min-h-screen items-center justify-center p-6">
-			<Alert variant="destructive" className="max-w-lg">
-				<AlertTitle>
-					{unreachable ? "Could not reach the API" : "Could not load the app"}
-				</AlertTitle>
-				<AlertDescription>
-					<p>{message}</p>
-					{unreachable ? (
-						<p>
-							The frontend expects the API at <code>{API_BASE_URL}</code>. Start
-							the backend, set <code>VITE_API_URL</code>, or run{" "}
-							<code>npm run dev:mock</code> to work against the mock API.
-						</p>
-					) : null}
-					<Button
-						type="button"
-						variant="outline"
-						size="sm"
-						className="mt-2"
-						onClick={onRetry}
-					>
-						Try again
-					</Button>
-				</AlertDescription>
-			</Alert>
+			<Notice
+				tone="danger"
+				className="max-w-lg"
+				title={
+					unreachable ? "Could not reach the API" : "Could not load the app"
+				}
+			>
+				<p>{message}</p>
+				{unreachable ? (
+					<p>
+						The frontend expects the API at <code>{API_BASE_URL}</code>. Start
+						the backend, set <code>VITE_API_URL</code>, or run{" "}
+						<code>npm run dev:mock</code> to work against the mock API.
+					</p>
+				) : null}
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					className="mt-2"
+					onClick={onRetry}
+				>
+					Try again
+				</Button>
+			</Notice>
 		</main>
 	);
 }

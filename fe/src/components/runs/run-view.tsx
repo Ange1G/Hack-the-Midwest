@@ -2,10 +2,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { PageHeader } from "#/components/layout/page";
+import { Notice } from "#/components/notice";
 import { ErrorState, LoadingState } from "#/components/states";
 import { StatusBadge } from "#/components/status-badge";
-import { Alert, AlertDescription, AlertTitle } from "#/components/ui/alert";
-import { Badge } from "#/components/ui/badge";
+import { type Tone, ToneBadge } from "#/components/tone-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "#/components/ui/card";
 import {
 	agentQueryOptions,
@@ -17,6 +17,7 @@ import {
 } from "#/lib/api/queries";
 import type { Run, RunEvent } from "#/lib/api/schemas";
 import { formatDateTime, formatDuration } from "#/lib/format";
+import { textLinkClass } from "#/lib/styles";
 
 export function RunView({
 	runId,
@@ -74,31 +75,31 @@ export function RunView({
 			/>
 
 			{data.status === "killed" ? (
-				<Alert variant="destructive" className="mb-6">
-					<AlertTitle>
-						{data.error ?? "Terminated by the security monitor"}
-					</AlertTitle>
-					<AlertDescription>
-						{finding ? (
-							<>
-								<p>{finding.message}</p>
-								<p>
-									<code>{finding.rule}</code> · severity {finding.severity}
-								</p>
-							</>
-						) : null}
-						<p>
-							<Link to="/security">See all findings</Link>
-						</p>
-					</AlertDescription>
-				</Alert>
+				<Notice
+					tone="danger"
+					className="mb-6"
+					title={data.error ?? "Terminated by the security monitor"}
+				>
+					{finding ? (
+						<>
+							<p>{finding.message}</p>
+							<p>
+								<code>{finding.rule}</code> · severity {finding.severity}
+							</p>
+						</>
+					) : null}
+					<p>
+						<Link to="/security" className={textLinkClass}>
+							See all findings
+						</Link>
+					</p>
+				</Notice>
 			) : null}
 
 			{data.status === "failed" && data.error ? (
-				<Alert variant="destructive" className="mb-6">
-					<AlertTitle>Run failed</AlertTitle>
-					<AlertDescription>{data.error}</AlertDescription>
-				</Alert>
+				<Notice tone="danger" className="mb-6" title="Run failed">
+					<p>{data.error}</p>
+				</Notice>
 			) : null}
 
 			<Timeline run={data} />
@@ -158,14 +159,11 @@ function Timeline({ run }: { run: Run }) {
 	);
 }
 
-const eventVariant: Record<
-	RunEvent["type"],
-	"default" | "secondary" | "destructive" | "outline"
-> = {
-	log: "outline",
-	tool_call: "secondary",
-	tool_result: "secondary",
-	security: "destructive",
+const eventTone: Record<RunEvent["type"], Tone> = {
+	log: "neutral",
+	tool_call: "info",
+	tool_result: "info",
+	security: "danger",
 };
 
 function EventLog({ events, live }: { events: RunEvent[]; live: boolean }) {
@@ -186,9 +184,9 @@ function EventLog({ events, live }: { events: RunEvent[]; live: boolean }) {
 					<span className="shrink-0 text-muted-foreground">
 						{new Date(event.ts).toLocaleTimeString()}
 					</span>
-					<Badge variant={eventVariant[event.type]} className="shrink-0">
+					<ToneBadge tone={eventTone[event.type]} className="shrink-0">
 						{event.type}
-					</Badge>
+					</ToneBadge>
 					<span className="break-all">{event.message}</span>
 				</li>
 			))}
