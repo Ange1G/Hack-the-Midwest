@@ -61,3 +61,45 @@ Ensure PostgreSQL is running and `agent_platform_test` exists, then:
 ```bash
 uv run pytest
 ```
+
+## Agent credentials
+
+HTTP contracts may carry `xApiKey` and `authorizationHeader`. They are encrypted with
+`SECRETS_ENCRYPTION_KEY`, stored in the `agent_secrets` table, and replaced by `"********"`
+in `configurations`, so API responses never include them.
+
+Generate a key and put it in `.env` (never commit it):
+
+```bash
+uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Without a key, agents without credentials still work; creating one with credentials returns `503`.
+Losing or changing the key makes stored credentials unreadable.
+
+## Create an agent
+
+```bash
+curl -s -X POST -H "X-Dev-User-SSO: sso-user-a" -H "Content-Type: application/json" \
+  "http://localhost:8000/api/v1/agents/sso-user-a" \
+  -d '{
+    "agentTitle": "Weekday digest",
+    "systemPrompt": "Summarize new issues from the last day.",
+    "configurations": {
+      "primitives": {
+        "list_issues": {
+          "contractVersion": 1,
+          "method": "GET",
+          "URL": "https://api.github.com/repos/acme/web/issues",
+          "authorizationHeader": "Bearer <token>",
+          "options": { "retries": 3, "timeout": 10000 }
+        }
+      },
+      "dayOfWeek": [1, 2, 3, 4, 5],
+      "timeOfDay": [540]
+    }
+  }'
+```
+
+`dayOfWeek`: 0 = Sunday ... 6 = Saturday. `timeOfDay`: minutes after midnight (540 = 09:00).
+Full rules: `spec/2026-10-10-agent-create-http-contract/`.
