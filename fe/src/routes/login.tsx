@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { AuthLayout } from "#/components/auth/auth-layout";
 import { LoginForm } from "#/components/auth/login-form";
 import { ensureMocksReady } from "#/lib/mocks-ready";
+import { DEMO_EMAIL, DEMO_PASSWORD } from "#/mocks/demo-account";
 
 export const Route = createFileRoute("/login")({
 	ssr: false,
@@ -24,7 +25,7 @@ function LoginPage() {
 			<LoginForm onSuccess={() => navigate({ to: "/agents" })} />
 			{import.meta.env.VITE_USE_MOCKS === "true" ? (
 				<p className="mt-4 text-xs text-muted-foreground">
-					Mock mode. Demo account: demo@example.com / demo-password, or sign up
+					Mock mode. Demo account: {DEMO_EMAIL} / {DEMO_PASSWORD}, or sign up
 					with any email to start from scratch.
 				</p>
 			) : null}

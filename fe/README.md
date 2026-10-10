@@ -14,7 +14,7 @@ npm run dev
 | Command | What it does |
 |---|---|
 | `npm run dev` | Dev server on port 3000 against the real API (`VITE_API_URL`, default `http://localhost:8000`). |
-| `npm run dev:mock` | Dev server against the in-browser mock API (Mock Service Worker). No backend needed. Demo account: `demo@example.com` / `demo-password`. |
+| `npm run dev:mock` | Dev server against the in-browser mock API (Mock Service Worker). No backend needed. Demo account: `admin@example.com` / `password`. |
 | `npm test` | Vitest unit and integration tests (`npm run test:watch` to keep them running). |
 | `npm run test:e2e` | Playwright end-to-end tests against a mock-mode dev server on port 3100. |
 | `npm run typecheck` | TypeScript, no emit. |

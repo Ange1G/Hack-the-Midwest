@@ -1,3 +1,4 @@
+import { DEMO_EMAIL, DEMO_PASSWORD } from "./demo-account";
 import {
 	createAgent,
 	createRun,
@@ -5,9 +6,6 @@ import {
 	publicUser,
 	runToCompletion,
 } from "./state";
-
-export const DEMO_EMAIL = "demo@example.com";
-export const DEMO_PASSWORD = "demo-password";
 
 // Demo data for mock mode so every screen has something to show. Sign up with
 // a fresh email instead to see the empty states.
