@@ -13,6 +13,8 @@ class RunRequest:
     agent_manifest: dict[str, Any]
     timeout_seconds: int
     image: str
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-4o-mini"
 
 
 @dataclass(frozen=True)
