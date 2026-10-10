@@ -17,6 +17,7 @@ import { Route as AppAgentsIndexRouteImport } from './routes/_app/agents/index'
 import { Route as AppAgentsAgentIdRouteImport } from './routes/_app/agents/$agentId'
 import { Route as AppAgentsNewRouteImport } from './routes/_app/agents/new'
 import { Route as AppRunsRunIdRouteImport } from './routes/_app/runs/$runId'
+import { Route as AppAgentsAgentIdEditRouteImport } from './routes/_app/agents/$agentId_.edit'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -57,6 +58,11 @@ const AppRunsRunIdRoute = AppRunsRunIdRouteImport.update({
   path: '/runs/$runId',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAgentsAgentIdEditRoute = AppAgentsAgentIdEditRouteImport.update({
+  id: '/agents/$agentId_/edit',
+  path: '/agents/$agentId/edit',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -66,6 +72,7 @@ export interface FileRoutesByFullPath {
   '/agents/new': typeof AppAgentsNewRoute
   '/runs/$runId': typeof AppRunsRunIdRoute
   '/agents/': typeof AppAgentsIndexRoute
+  '/agents/$agentId/edit': typeof AppAgentsAgentIdEditRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -75,6 +82,7 @@ export interface FileRoutesByTo {
   '/agents/new': typeof AppAgentsNewRoute
   '/runs/$runId': typeof AppRunsRunIdRoute
   '/agents': typeof AppAgentsIndexRoute
+  '/agents/$agentId/edit': typeof AppAgentsAgentIdEditRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -86,6 +94,7 @@ export interface FileRoutesById {
   '/_app/agents/new': typeof AppAgentsNewRoute
   '/_app/runs/$runId': typeof AppRunsRunIdRoute
   '/_app/agents/': typeof AppAgentsIndexRoute
+  '/_app/agents/$agentId_/edit': typeof AppAgentsAgentIdEditRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -97,6 +106,7 @@ export interface FileRouteTypes {
     | '/agents/new'
     | '/runs/$runId'
     | '/agents/'
+    | '/agents/$agentId/edit'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -106,6 +116,7 @@ export interface FileRouteTypes {
     | '/agents/new'
     | '/runs/$runId'
     | '/agents'
+    | '/agents/$agentId/edit'
   id:
     | '__root__'
     | '/'
@@ -116,6 +127,7 @@ export interface FileRouteTypes {
     | '/_app/agents/new'
     | '/_app/runs/$runId'
     | '/_app/agents/'
+    | '/_app/agents/$agentId_/edit'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -182,6 +194,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRunsRunIdRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/agents/$agentId_/edit': {
+      id: '/_app/agents/$agentId_/edit'
+      path: '/agents/$agentId/edit'
+      fullPath: '/agents/$agentId/edit'
+      preLoaderRoute: typeof AppAgentsAgentIdEditRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -191,6 +210,7 @@ interface AppRouteChildren {
   AppAgentsNewRoute: typeof AppAgentsNewRoute
   AppRunsRunIdRoute: typeof AppRunsRunIdRoute
   AppAgentsIndexRoute: typeof AppAgentsIndexRoute
+  AppAgentsAgentIdEditRoute: typeof AppAgentsAgentIdEditRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -199,6 +219,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAgentsNewRoute: AppAgentsNewRoute,
   AppRunsRunIdRoute: AppRunsRunIdRoute,
   AppAgentsIndexRoute: AppAgentsIndexRoute,
+  AppAgentsAgentIdEditRoute: AppAgentsAgentIdEditRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
