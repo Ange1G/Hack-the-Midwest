@@ -17,6 +17,8 @@ docker build -t agent-platform-runner:local .
 | `AGENT_MANIFEST` | JSON: `title`, `system_prompt`, `connector_ids` (no secrets) |
 | `OPENAI_API_KEY` | Platform key; never from the client |
 | `OPENAI_MODEL` | Default `gpt-4o-mini` |
+| `HTTP_TOOLS_JSON` | HTTP connector specs (method, URL, payload). No credentials. |
+| `HTTP_CREDENTIALS_JSON` | Map of connector id → header credentials. Never in the manifest. |
 
 The container must reach the API at `EXECUTION_CALLBACK_BASE_URL`
 (default `http://host.docker.internal:8000`). The worker passes
