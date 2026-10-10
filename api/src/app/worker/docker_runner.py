@@ -21,6 +21,10 @@ def docker_run_command(request: RunRequest) -> list[str]:
     ]
     if request.openai_api_key:
         env.append(f"OPENAI_API_KEY={request.openai_api_key}")
+    if request.http_tools is not None:
+        env.append(f"HTTP_TOOLS_JSON={json.dumps(request.http_tools)}")
+    if request.http_credentials:
+        env.append(f"HTTP_CREDENTIALS_JSON={json.dumps(request.http_credentials)}")
     command = [
         "docker",
         "run",
