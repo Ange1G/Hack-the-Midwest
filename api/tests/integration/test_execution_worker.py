@@ -18,15 +18,16 @@ class FakeCallbackRunner:
         self._client = client
 
     async def run(self, request: RunRequest) -> RunOutcome:
+        assert request.openai_api_key
+        assert "sk-" not in request.agent_manifest.get("system_prompt", "")
         path = urlparse(request.callback_url).path
         response = await self._client.post(
             path,
             json={
                 "status": "succeeded",
                 "result": {
-                    "message": "stub run complete",
-                    "execution_id": str(request.execution_id),
-                    "agent_id": str(request.agent_id),
+                    "output": "model said this",
+                    "model": request.openai_model,
                 },
             },
             headers={"X-Execution-Callback-Token": request.callback_token},
@@ -67,6 +68,6 @@ async def test_worker_with_fake_runner_marks_succeeded(
     )
     body = fetched.json()["data"]
     assert body["status"] == "succeeded"
-    assert body["result"]["message"] == "stub run complete"
-    assert body["result"]["agent_id"] == str(agent.id)
+    assert body["result"]["output"] == "model said this"
+    assert "sk-" not in fetched.text
     assert body["runner_meta"]["http_status"] == 200
