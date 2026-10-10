@@ -1,19 +1,16 @@
 import type { ReactNode } from "react";
-import { Badge } from "#/components/ui/badge";
 import { cn } from "#/lib/utils";
 
 export type Tone = "neutral" | "info" | "success" | "warning" | "danger";
 
-// Text stays in --foreground on a light tint of a :root palette colour, so a
-// label is always above the WCAG AA 4.5:1 contrast ratio while the border and
-// tint still carry the meaning. White-on-colour badges with this palette fall
-// below the ratio (secondary teal 2.5:1, destructive 3.4:1).
-export const toneClasses: Record<Tone, string> = {
-	neutral: "border-border bg-transparent text-foreground",
-	info: "border-(--lagoon-deep) bg-(--lagoon)/15 text-foreground",
-	success: "border-(--palm) bg-(--palm)/12 text-foreground",
-	warning: "border-(--accent) bg-(--accent)/30 text-foreground",
-	danger: "border-(--destructive) bg-(--destructive)/12 text-foreground",
+// Status and severity labels: meaning in a small palette dot; label text stays
+// --foreground for contrast (see tone-badge.test.tsx and AGENTS WCAG notes).
+const toneDotClass: Record<Tone, string> = {
+	neutral: "bg-muted-foreground",
+	info: "bg-(--lagoon-deep)",
+	success: "bg-(--palm)",
+	warning: "bg-(--kicker)",
+	danger: "bg-(--destructive)",
 };
 
 export function ToneBadge({
@@ -26,8 +23,17 @@ export function ToneBadge({
 	children: ReactNode;
 }) {
 	return (
-		<Badge variant="outline" className={cn(toneClasses[tone], className)}>
-			{children}
-		</Badge>
+		<span
+			className={cn(
+				"inline-flex max-w-full min-w-0 items-center gap-2 text-sm font-medium text-foreground",
+				className,
+			)}
+		>
+			<span
+				className={cn("size-2 shrink-0 rounded-full", toneDotClass[tone])}
+				aria-hidden="true"
+			/>
+			<span className="truncate">{children}</span>
+		</span>
 	);
 }

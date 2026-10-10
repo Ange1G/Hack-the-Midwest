@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { delay, http } from "msw";
 import { describe, expect, it } from "vitest";
@@ -64,12 +64,74 @@ describe("AgentList", () => {
 		expect(
 			within(safeRow).getByRole("link", { name: "Uptime checker" }),
 		).toHaveAttribute("href", `/agents/${safe.id}`);
-		expect(within(safeRow).getByText("GET status")).toBeInTheDocument();
+		expect(within(safeRow).getByText("GET")).toBeInTheDocument();
+		expect(within(safeRow).getByText("status")).toBeInTheDocument();
 		expect(within(safeRow).getByText(/succeeded/i)).toBeInTheDocument();
 		expect(within(safeRow).queryByText(/flagged/i)).not.toBeInTheDocument();
 
-		expect(within(rogueRow).getByText("POST leak")).toBeInTheDocument();
+		expect(within(rogueRow).getByText("POST")).toBeInTheDocument();
+		expect(within(rogueRow).getByText("leak")).toBeInTheDocument();
 		expect(within(rogueRow).getByText(/killed/i)).toBeInTheDocument();
 		expect(within(rogueRow).getByText(/flagged/i)).toBeInTheDocument();
+	});
+
+	it("offers start, edit, view, and delete actions on an idle agent", async () => {
+		const owner = signInAs();
+		const agent = createAgent(owner.user_sso, safeAgentInput);
+		renderWithProviders(<AgentList />);
+
+		const row = (
+			await screen.findByRole("link", { name: "Uptime checker" })
+		).closest("tr");
+		if (!row) throw new Error("expected a table row");
+
+		expect(within(row).getByRole("button", { name: "Start" })).toBeEnabled();
+		expect(
+			within(row).getByRole("link", { name: "Edit configuration" }),
+		).toHaveAttribute("href", `/agents/${agent.id}/edit`);
+		expect(
+			within(row).getByRole("link", { name: "View details" }),
+		).toHaveAttribute("href", `/agents/${agent.id}`);
+		expect(within(row).getByRole("button", { name: "Delete" })).toBeEnabled();
+		expect(
+			within(row).queryByRole("button", { name: "Stop" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("starts a run from the table and then offers stop", async () => {
+		const owner = signInAs();
+		createAgent(owner.user_sso, safeAgentInput);
+		const user = userEvent.setup();
+		renderWithProviders(<AgentList />);
+
+		const row = (
+			await screen.findByRole("link", { name: "Uptime checker" })
+		).closest("tr");
+		if (!row) throw new Error("expected a table row");
+
+		await user.click(within(row).getByRole("button", { name: "Start" }));
+
+		await waitFor(() => {
+			expect(
+				within(row).getByRole("button", { name: "Stop" }),
+			).toBeInTheDocument();
+		});
+	});
+
+	it("shows stop instead of start while the last run is still active", async () => {
+		const owner = signInAs();
+		const agent = createAgent(owner.user_sso, safeAgentInput);
+		createRun(agent);
+		renderWithProviders(<AgentList />);
+
+		const row = (
+			await screen.findByRole("link", { name: "Uptime checker" })
+		).closest("tr");
+		if (!row) throw new Error("expected a table row");
+
+		expect(within(row).getByRole("button", { name: "Stop" })).toBeEnabled();
+		expect(
+			within(row).queryByRole("button", { name: "Start" }),
+		).not.toBeInTheDocument();
 	});
 });

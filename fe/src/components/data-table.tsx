@@ -3,6 +3,7 @@ import {
 	type ColumnDef,
 	createSortedRowModel,
 	flexRender,
+	metaHelper,
 	type RowData,
 	rowSortingFeature,
 	type SortingState,
@@ -22,11 +23,19 @@ import {
 	TableHeader,
 	TableRow,
 } from "#/components/ui/table";
+import { TooltipProvider } from "#/components/ui/tooltip";
+import { cn } from "#/lib/utils";
+
+type DataTableColumnMeta = {
+	headerClassName?: string;
+	cellClassName?: string;
+};
 
 // Defined once, statically: the TanStack Table features every app table uses.
 const features = tableFeatures({
 	rowSortingFeature,
 	sortedRowModel: createSortedRowModel(),
+	columnMeta: metaHelper<DataTableColumnMeta>(),
 	sortFns: {
 		alphanumeric: sortFn_alphanumeric,
 		basic: sortFn_basic,
@@ -49,12 +58,15 @@ type Props<TData extends RowData> = {
 };
 
 function SortIcon({ direction }: { direction: false | "asc" | "desc" }) {
+	const className = "size-3.5 text-muted-foreground";
 	if (direction === "asc")
-		return <ArrowUp className="size-3.5" aria-hidden="true" />;
+		return <ArrowUp className={className} aria-hidden="true" />;
 	if (direction === "desc") {
-		return <ArrowDown className="size-3.5" aria-hidden="true" />;
+		return <ArrowDown className={className} aria-hidden="true" />;
 	}
-	return <ArrowUpDown className="size-3.5 opacity-60" aria-hidden="true" />;
+	return (
+		<ArrowUpDown className={`${className} opacity-60`} aria-hidden="true" />
+	);
 }
 
 function ariaSort(
@@ -81,66 +93,87 @@ export function DataTable<TData extends RowData>({
 	const rows = table.getRowModel().rows;
 
 	return (
-		<div className="island-shell rounded-xl px-2 py-1">
-			<Table>
-				<caption className="sr-only">{caption}</caption>
-				<TableHeader>
-					{table.getHeaderGroups().map((headerGroup) => (
-						<TableRow key={headerGroup.id}>
-							{headerGroup.headers.map((header) => {
-								const column = header.column;
-								const direction = column.getIsSorted();
-								const label =
-									typeof column.columnDef.header === "string"
-										? column.columnDef.header
-										: column.id;
-								const content = header.isPlaceholder
-									? null
-									: flexRender(column.columnDef.header, header.getContext());
-								return (
-									<TableHead key={header.id} aria-sort={ariaSort(direction)}>
-										{column.getCanSort() ? (
-											<button
-												type="button"
-												aria-label={`Sort by ${label}`}
-												className="inline-flex items-center gap-1 rounded-sm font-medium hover:underline focus-visible:outline-2 focus-visible:outline-ring"
-												onClick={column.getToggleSortingHandler()}
-											>
-												{content}
-												<SortIcon direction={direction} />
-											</button>
-										) : (
-											content
-										)}
-									</TableHead>
-								);
-							})}
-						</TableRow>
-					))}
-				</TableHeader>
-				<TableBody>
-					{rows.length === 0 ? (
-						<TableRow>
-							<TableCell
-								colSpan={columns.length}
-								className="text-center text-sm text-muted-foreground"
+		<div className="table-panel overflow-hidden rounded-xl">
+			<TooltipProvider delayDuration={0}>
+				<Table>
+					<caption className="sr-only">{caption}</caption>
+					<TableHeader>
+						{table.getHeaderGroups().map((headerGroup) => (
+							<TableRow
+								key={headerGroup.id}
+								className="border-b hover:bg-transparent"
 							>
-								{emptyMessage}
-							</TableCell>
-						</TableRow>
-					) : (
-						rows.map((row) => (
-							<TableRow key={row.id}>
-								{row.getAllCells().map((cell) => (
-									<TableCell key={cell.id}>
-										{flexRender(cell.column.columnDef.cell, cell.getContext())}
-									</TableCell>
-								))}
+								{headerGroup.headers.map((header) => {
+									const column = header.column;
+									const direction = column.getIsSorted();
+									const label =
+										typeof column.columnDef.header === "string"
+											? column.columnDef.header
+											: column.id;
+									const content = header.isPlaceholder
+										? null
+										: flexRender(column.columnDef.header, header.getContext());
+									return (
+										<TableHead
+											key={header.id}
+											aria-sort={ariaSort(direction)}
+											className={cn(
+												"h-12 px-4 font-medium",
+												column.columnDef.meta?.headerClassName,
+											)}
+										>
+											{column.getCanSort() ? (
+												<button
+													type="button"
+													aria-label={`Sort by ${label}`}
+													className="inline-flex items-center gap-1 rounded-sm font-medium text-foreground hover:text-(--sea-ink-soft) focus-visible:outline-2 focus-visible:outline-ring"
+													onClick={column.getToggleSortingHandler()}
+												>
+													{content}
+													<SortIcon direction={direction} />
+												</button>
+											) : (
+												content
+											)}
+										</TableHead>
+									);
+								})}
 							</TableRow>
-						))
-					)}
-				</TableBody>
-			</Table>
+						))}
+					</TableHeader>
+					<TableBody>
+						{rows.length === 0 ? (
+							<TableRow>
+								<TableCell
+									colSpan={columns.length}
+									className="h-16 px-4 text-center text-sm text-muted-foreground"
+								>
+									{emptyMessage}
+								</TableCell>
+							</TableRow>
+						) : (
+							rows.map((row) => (
+								<TableRow key={row.id} className="hover:bg-(--chip-bg)">
+									{row.getAllCells().map((cell) => (
+										<TableCell
+											key={cell.id}
+											className={cn(
+												"h-16 px-4",
+												cell.column.columnDef.meta?.cellClassName,
+											)}
+										>
+											{flexRender(
+												cell.column.columnDef.cell,
+												cell.getContext(),
+											)}
+										</TableCell>
+									))}
+								</TableRow>
+							))
+						)}
+					</TableBody>
+				</Table>
+			</TooltipProvider>
 		</div>
 	);
 }

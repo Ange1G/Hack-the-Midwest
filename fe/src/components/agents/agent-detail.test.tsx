@@ -94,10 +94,9 @@ describe("AgentDetail", () => {
 			.getByText(/succeeded/i)
 			.closest("tr");
 		if (!row) throw new Error("expected a run row");
-		expect(within(row).getByRole("link", { name: /view/i })).toHaveAttribute(
-			"href",
-			`/runs/${run.id}`,
-		);
+		expect(
+			within(row).getByRole("link", { name: /view run/i }),
+		).toHaveAttribute("href", `/runs/${run.id}`);
 	});
 
 	it("shows an error state when the agent does not exist", async () => {

@@ -1,5 +1,11 @@
 import { Link } from "@tanstack/react-router";
+import { FileTextIcon, PauseIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { DataTable, type DataTableColumn } from "#/components/data-table";
+import {
+	DataTableActionButton,
+	DataTableActionsCell,
+} from "#/components/data-table-action-button";
 import { PageHeader } from "#/components/layout/page";
 import { Notice } from "#/components/notice";
 import { EmptyState, ErrorState, LoadingState } from "#/components/states";
@@ -8,7 +14,12 @@ import { ToneBadge } from "#/components/tone-badge";
 import { Button } from "#/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "#/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
-import { useAgent, useAgentRuns, useStartRun } from "#/lib/api/queries";
+import {
+	isActiveRunStatus,
+	useAgent,
+	useAgentRuns,
+	useStartRun,
+} from "#/lib/api/queries";
 import type { AgentConfigurations, HttpContract, Run } from "#/lib/api/schemas";
 import { formatDateTime, formatDuration } from "#/lib/format";
 import { minutesToTime } from "#/lib/http-contract";
@@ -273,19 +284,52 @@ const runColumns: DataTableColumn<Run>[] = [
 	},
 	{
 		id: "actions",
-		header: () => <span className="sr-only">Actions</span>,
+		header: "Actions",
 		enableSorting: false,
-		cell: ({ row }) => (
-			<Link
-				to="/runs/$runId"
-				params={{ runId: row.original.id }}
-				className={textLinkClass}
-			>
-				View
-			</Link>
-		),
+		meta: {
+			headerClassName: "w-[120px] text-right",
+			cellClassName: "text-right",
+		},
+		cell: ({ row }) => <RunActions run={row.original} />,
 	},
 ];
+
+function RunActions({ run }: { run: Run }) {
+	const [pending, setPending] = useState(false);
+	const timer = useRef<number>(undefined);
+	useEffect(
+		() => () => {
+			window.clearTimeout(timer.current);
+		},
+		[],
+	);
+
+	return (
+		<DataTableActionsCell>
+			{isActiveRunStatus(run.status) ? (
+				<DataTableActionButton
+					label="Stop"
+					icon={<PauseIcon className="size-4" />}
+					pending={pending}
+					disabled={pending}
+					onClick={() => {
+						window.clearTimeout(timer.current);
+						setPending(true);
+						timer.current = window.setTimeout(() => setPending(false), 800);
+					}}
+				/>
+			) : null}
+			<DataTableActionButton
+				label="View run"
+				icon={<FileTextIcon className="size-4" />}
+				disabled={pending}
+				asChild
+			>
+				<Link to="/runs/$runId" params={{ runId: run.id }} />
+			</DataTableActionButton>
+		</DataTableActionsCell>
+	);
+}
 
 function AgentRuns({ agentId }: { agentId: string }) {
 	const runs = useAgentRuns(agentId);

@@ -4,7 +4,8 @@ import { HttpResponse, http } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import { API_BASE_URL } from "#/lib/api/client";
 import { server } from "#/mocks/server";
-import { mockState } from "#/mocks/state";
+import { createAgent, mockState } from "#/mocks/state";
+import { safeAgentInput } from "#/test/fixtures";
 import { renderWithProviders } from "#/test/render";
 import { signInAs } from "#/test/session";
 import { AgentForm } from "./agent-form";
@@ -204,5 +205,33 @@ describe("AgentForm", () => {
 			await call.findByText(/internal hostnames are not allowed/i),
 		).toBeInTheDocument();
 		expect(onCreated).not.toHaveBeenCalled();
+	});
+
+	it("prefills a read-only edit shell and disables saving", async () => {
+		const owner = signInAs();
+		const agent = createAgent(owner.user_sso, {
+			...safeAgentInput,
+			configurations: {
+				...safeAgentInput.configurations,
+				dayOfWeek: [1, 3],
+				timeOfDay: [540],
+			},
+		});
+		renderWithProviders(<AgentForm agent={agent} readOnly />);
+
+		expect(await screen.findByLabelText(/^name$/i)).toHaveValue(
+			"Uptime checker",
+		);
+		expect(screen.getByLabelText(/^name$/i)).toBeDisabled();
+		expect(screen.getByLabelText(/^instructions$/i)).toBeDisabled();
+		expect(screen.getByLabelText(/call name/i)).toHaveValue("status");
+		expect(screen.getByLabelText(/call name/i)).toBeDisabled();
+		expect(screen.queryByRole("button", { name: /add http call/i })).toBeNull();
+		expect(
+			screen.getByRole("button", { name: /save changes/i }),
+		).toBeDisabled();
+		expect(
+			screen.getByText(/saving changes is not available yet/i),
+		).toBeInTheDocument();
 	});
 });

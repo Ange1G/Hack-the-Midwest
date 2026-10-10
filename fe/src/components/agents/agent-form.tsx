@@ -20,6 +20,7 @@ import {
 	MAX_RETRIES,
 	MAX_TIMEOUT_MS,
 	MIN_TIMEOUT_MS,
+	minutesToTime,
 	timeToMinutes,
 } from "#/lib/http-contract";
 import { cn } from "#/lib/utils";
@@ -76,6 +77,48 @@ const emptyCall = (): CallDraft => ({
 	retries: "",
 	timeout: "",
 });
+
+function draftsFromAgent(agent: Agent): {
+	name: string;
+	instructions: string;
+	calls: CallDraft[];
+	days: number[];
+	times: string;
+	month: string;
+} {
+	return {
+		name: agent.title,
+		instructions: agent.system_prompt,
+		calls: Object.entries(agent.configurations.primitives).map(
+			([name, contract]) => ({
+				key: nextKey++,
+				name,
+				method: contract.method,
+				url: contract.URL,
+				payload:
+					contract.payload !== undefined
+						? JSON.stringify(contract.payload, null, 2)
+						: "",
+				xApiKey: contract.xApiKey ?? "",
+				authorizationHeader: contract.authorizationHeader ?? "",
+				retries:
+					contract.options?.retries != null
+						? String(contract.options.retries)
+						: "",
+				timeout:
+					contract.options?.timeout != null
+						? String(contract.options.timeout)
+						: "",
+			}),
+		),
+		days: [...agent.configurations.dayOfWeek],
+		times: agent.configurations.timeOfDay.map(minutesToTime).join(", "),
+		month:
+			agent.configurations.month != null
+				? String(agent.configurations.month)
+				: "",
+	};
+}
 
 type Errors = Record<string, string>;
 
@@ -214,14 +257,19 @@ function FieldError({ message }: { message: string | undefined }) {
 
 export function AgentForm({
 	onCreated,
+	agent,
+	readOnly = false,
 }: {
-	onCreated: (agent: Agent) => void;
+	onCreated?: (agent: Agent) => void;
+	agent?: Agent;
+	readOnly?: boolean;
 }) {
 	const createAgent = useCreateAgent();
-	const [calls, setCalls] = useState<CallDraft[]>([]);
-	const [days, setDays] = useState<number[]>([]);
-	const [times, setTimes] = useState("");
-	const [month, setMonth] = useState("");
+	const initial = agent ? draftsFromAgent(agent) : null;
+	const [calls, setCalls] = useState<CallDraft[]>(initial?.calls ?? []);
+	const [days, setDays] = useState<number[]>(initial?.days ?? []);
+	const [times, setTimes] = useState(initial?.times ?? "");
+	const [month, setMonth] = useState(initial?.month ?? "");
 	const [errors, setErrors] = useState<Errors>({});
 
 	const updateCall = (key: number, patch: Partial<CallDraft>) =>
@@ -230,8 +278,12 @@ export function AgentForm({
 		);
 
 	const form = useForm({
-		defaultValues: { name: "", instructions: "" },
+		defaultValues: {
+			name: initial?.name ?? "",
+			instructions: initial?.instructions ?? "",
+		},
 		onSubmit: ({ value }) => {
+			if (readOnly || !onCreated) return;
 			const { input, errors: problems } = buildInput(value, calls, {
 				days,
 				times,
@@ -240,7 +292,7 @@ export function AgentForm({
 			setErrors(problems);
 			if (Object.keys(problems).length > 0) return;
 			createAgent.mutate(input, {
-				onSuccess: (agent) => onCreated(agent),
+				onSuccess: (created) => onCreated(created),
 				onError: (error) => {
 					if (error instanceof ApiError && error.fields) {
 						setErrors(
@@ -280,6 +332,7 @@ export function AgentForm({
 								value={field.state.value}
 								onBlur={field.handleBlur}
 								onChange={(event) => field.handleChange(event.target.value)}
+								disabled={readOnly}
 								aria-invalid={fieldErrorMessages(field).length > 0}
 								aria-describedby="agent-name-error"
 							/>
@@ -303,6 +356,7 @@ export function AgentForm({
 								value={field.state.value}
 								onBlur={field.handleBlur}
 								onChange={(event) => field.handleChange(event.target.value)}
+								disabled={readOnly}
 								aria-invalid={fieldErrorMessages(field).length > 0}
 								aria-describedby="agent-instructions-error"
 							/>
@@ -329,20 +383,22 @@ export function AgentForm({
 						className="island-shell space-y-4 rounded-xl p-4"
 					>
 						<legend className="px-1 font-medium">HTTP call {index + 1}</legend>
-						<div className="flex justify-end">
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								onClick={() =>
-									setCalls((previous) =>
-										previous.filter((item) => item.key !== call.key),
-									)
-								}
-							>
-								Remove call {index + 1}
-							</Button>
-						</div>
+						{readOnly ? null : (
+							<div className="flex justify-end">
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									onClick={() =>
+										setCalls((previous) =>
+											previous.filter((item) => item.key !== call.key),
+										)
+									}
+								>
+									Remove call {index + 1}
+								</Button>
+							</div>
+						)}
 
 						<div className="grid gap-4 sm:grid-cols-[1fr_8rem]">
 							<div className="space-y-1.5">
@@ -356,6 +412,7 @@ export function AgentForm({
 									onChange={(event) =>
 										updateCall(call.key, { name: event.target.value })
 									}
+									disabled={readOnly}
 									aria-invalid={Boolean(errors[`calls.${index}.name`])}
 								/>
 								<FieldError message={errors[`calls.${index}.name`]} />
@@ -366,6 +423,7 @@ export function AgentForm({
 									id={`call-${call.key}-method`}
 									className={selectClass}
 									value={call.method}
+									disabled={readOnly}
 									onChange={(event) =>
 										updateCall(call.key, {
 											method: event.target.value as HttpMethod,
@@ -388,6 +446,7 @@ export function AgentForm({
 								onChange={(event) =>
 									updateCall(call.key, { url: event.target.value })
 								}
+								disabled={readOnly}
 								aria-invalid={Boolean(errors[`calls.${index}.url`])}
 							/>
 							<FieldError message={errors[`calls.${index}.url`]} />
@@ -407,6 +466,7 @@ export function AgentForm({
 									onChange={(event) =>
 										updateCall(call.key, { payload: event.target.value })
 									}
+									disabled={readOnly}
 									aria-invalid={Boolean(errors[`calls.${index}.payload`])}
 								/>
 								<FieldError message={errors[`calls.${index}.payload`]} />
@@ -424,6 +484,7 @@ export function AgentForm({
 									onChange={(event) =>
 										updateCall(call.key, { xApiKey: event.target.value })
 									}
+									disabled={readOnly}
 									aria-invalid={Boolean(errors[`calls.${index}.xApiKey`])}
 								/>
 								<FieldError message={errors[`calls.${index}.xApiKey`]} />
@@ -443,6 +504,7 @@ export function AgentForm({
 											authorizationHeader: event.target.value,
 										})
 									}
+									disabled={readOnly}
 									aria-invalid={Boolean(
 										errors[`calls.${index}.authorizationHeader`],
 									)}
@@ -467,6 +529,7 @@ export function AgentForm({
 									onChange={(event) =>
 										updateCall(call.key, { retries: event.target.value })
 									}
+									disabled={readOnly}
 									aria-invalid={Boolean(errors[`calls.${index}.retries`])}
 								/>
 								<FieldError message={errors[`calls.${index}.retries`]} />
@@ -484,6 +547,7 @@ export function AgentForm({
 									onChange={(event) =>
 										updateCall(call.key, { timeout: event.target.value })
 									}
+									disabled={readOnly}
 									aria-invalid={Boolean(errors[`calls.${index}.timeout`])}
 								/>
 								<FieldError message={errors[`calls.${index}.timeout`]} />
@@ -491,13 +555,15 @@ export function AgentForm({
 						</div>
 					</fieldset>
 				))}
-				<Button
-					type="button"
-					variant="outline"
-					onClick={() => setCalls((previous) => [...previous, emptyCall()])}
-				>
-					Add HTTP call
-				</Button>
+				{readOnly ? null : (
+					<Button
+						type="button"
+						variant="outline"
+						onClick={() => setCalls((previous) => [...previous, emptyCall()])}
+					>
+						Add HTTP call
+					</Button>
+				)}
 			</section>
 
 			<section className="space-y-3" aria-labelledby="schedule-heading">
@@ -517,6 +583,7 @@ export function AgentForm({
 								<Checkbox
 									id={`day-${day.value}`}
 									checked={days.includes(day.value)}
+									disabled={readOnly}
 									onCheckedChange={(checked) =>
 										setDays((previous) =>
 											checked === true
@@ -541,6 +608,7 @@ export function AgentForm({
 							placeholder="09:00, 17:30"
 							value={times}
 							onChange={(event) => setTimes(event.target.value)}
+							disabled={readOnly}
 							aria-invalid={Boolean(errors["schedule.times"])}
 						/>
 						<FieldError message={errors["schedule.times"]} />
@@ -551,6 +619,7 @@ export function AgentForm({
 							id="schedule-month"
 							className={cn(selectClass)}
 							value={month}
+							disabled={readOnly}
 							onChange={(event) => setMonth(event.target.value)}
 						>
 							<option value="">Any month</option>
@@ -577,9 +646,20 @@ export function AgentForm({
 				</p>
 			) : null}
 
-			<Button type="submit" disabled={createAgent.isPending}>
-				{createAgent.isPending ? "Creating…" : "Create agent"}
-			</Button>
+			{readOnly ? (
+				<div className="space-y-2">
+					<Button type="submit" disabled>
+						Save changes
+					</Button>
+					<p className="text-sm text-muted-foreground">
+						Saving changes is not available yet.
+					</p>
+				</div>
+			) : (
+				<Button type="submit" disabled={createAgent.isPending}>
+					{createAgent.isPending ? "Creating…" : "Create agent"}
+				</Button>
+			)}
 		</form>
 	);
 }
