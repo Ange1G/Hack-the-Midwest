@@ -7,6 +7,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "#/components/ui/card";
+import { APP_BRANDING } from "#/config/developer-contexts";
 
 export function AuthLayout({
 	title,
@@ -23,7 +24,7 @@ export function AuthLayout({
 		<main className="flex min-h-screen items-center justify-center p-6">
 			<Card className="island-shell w-full max-w-sm">
 				<CardHeader>
-					<p className="island-kicker">Agent Platform</p>
+					<p className="island-kicker">{APP_BRANDING.productName}</p>
 					<CardTitle className="display-title text-2xl">{title}</CardTitle>
 					<CardDescription>{description}</CardDescription>
 				</CardHeader>
