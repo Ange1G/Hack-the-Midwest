@@ -1,12 +1,30 @@
-# Stub agent runner
+# Agent runner (Strands + OpenAI)
 
-Plumbing-only image for local execution. It reads callback env vars, POSTs a sample
-result to the API, and exits. It does not run Strands, call an LLM, or use connectors.
+Isolated execution image. The worker injects a **platform-owned** `OPENAI_API_KEY` at
+`docker run` time. The key must not appear in agent configuration, logs, or callback
+results.
 
 ```bash
 docker build -t agent-platform-runner:local .
 ```
 
-The worker starts this image. The container must be able to reach the API at
-`EXECUTION_CALLBACK_BASE_URL` (default `http://host.docker.internal:8000`).
-On Linux, the worker passes `--add-host=host.docker.internal:host-gateway`.
+## Environment (set by the worker)
+
+| Variable | Purpose |
+| --- | --- |
+| `CALLBACK_URL` | `POST …/internal/executions/{id}/complete` |
+| `CALLBACK_TOKEN` | Hashed at rest by the API |
+| `AGENT_MANIFEST` | JSON: `title`, `system_prompt`, `connector_ids` (no secrets) |
+| `OPENAI_API_KEY` | Platform key; never from the client |
+| `OPENAI_MODEL` | Default `gpt-4o-mini` |
+
+The container must reach the API at `EXECUTION_CALLBACK_BASE_URL`
+(default `http://host.docker.internal:8000`). The worker passes
+`--add-host=host.docker.internal:host-gateway`.
+
+## Security
+
+The agent container is untrusted (`system_prompt` is user-controlled). A malicious
+prompt could try to read process environment and send it outbound. Local MVP has no
+egress allowlist; production must restrict network to OpenAI and the callback host,
+and should prefer short-lived credentials over a long-lived `-e` key.
