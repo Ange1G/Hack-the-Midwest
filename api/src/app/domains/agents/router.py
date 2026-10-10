@@ -6,6 +6,11 @@ from app.common.envelope import ApiEnvelope
 from app.core.config import Settings, get_settings
 from app.domains.agents.controller import AgentsController
 from app.domains.agents.schemas import AgentRead
+from fastapi import status
+
+from app.api.deps import get_secret_cipher
+from app.core.secrets import SecretCipher
+from app.domains.agents.schemas import AgentCreate
 
 router = APIRouter()
 
@@ -26,3 +31,14 @@ async def list_agents_by_user_sso(
         page_size=resolved_page_size,
         caller=caller,
     )
+
+
+@router.post("/{user_sso}", status_code=status.HTTP_201_CREATED)
+async def create_agent(
+    user_sso: str,
+    body: AgentCreate,
+    controller: AgentsController = Depends(get_agents_controller),
+    caller: CurrentUser = Depends(get_current_user),
+    cipher: SecretCipher | None = Depends(get_secret_cipher),
+) -> ApiEnvelope[AgentRead]:
+    return await controller.create(user_sso, body, caller=caller, cipher=cipher)

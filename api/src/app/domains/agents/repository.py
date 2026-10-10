@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.pagination import offset_for_page
 from app.domains.agents.models import Agent
+from app.domains.agents.models import AgentSecret
 
 
 class AgentRepository(Protocol):
@@ -15,6 +16,8 @@ class AgentRepository(Protocol):
         page: int,
         page_size: int,
     ) -> tuple[list[Agent], int]: ...
+
+    async def create(self, agent: Agent, secrets: list[AgentSecret]) -> Agent: ...
 
 
 class SqlAlchemyAgentRepository:
@@ -51,4 +54,15 @@ class SqlAlchemyAgentRepository:
     async def add(self, agent: Agent) -> Agent:
         self._session.add(agent)
         await self._session.flush()
+        return agent
+
+    async def create(self, agent: Agent, secrets: list[AgentSecret]) -> Agent:
+        """Persist an agent and its encrypted credentials in one transaction."""
+        self._session.add(agent)
+        await self._session.flush()  # assigns agent.id
+        for secret in secrets:
+            secret.agent_id = agent.id
+            self._session.add(secret)
+        await self._session.commit()
+        await self._session.refresh(agent)  # load server-side timestamps
         return agent
