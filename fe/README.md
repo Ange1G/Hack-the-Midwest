@@ -9,6 +9,21 @@ npm install
 npm run dev
 ```
 
+## Scripts
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | Dev server on port 3000 against the real API (`VITE_API_URL`, default `http://localhost:8000/api/v1`). Sign in with the SSO id the API should trust (`X-Dev-User-SSO`). |
+| `npm run dev:mock` | Dev server against the in-browser mock API (Mock Service Worker). No backend needed. Any SSO id signs in; `admin` has demo data. |
+| `npm test` | Vitest unit and integration tests (`npm run test:watch` to keep them running). |
+| `npm run test:e2e` | Playwright end-to-end tests against a mock-mode dev server on port 3100. |
+| `npm run typecheck` | TypeScript, no emit. |
+| `npm run check` | Biome lint and format check. |
+
+The API contract the frontend is built against lives in
+`spec/2026-10-10-frontend-dashboard/plan.md`; the schemas in `src/lib/api/schemas.ts`
+are the single place that encodes it.
+
 # Building For Production
 
 To build this application for production:
