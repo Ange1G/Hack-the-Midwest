@@ -199,6 +199,26 @@ Note for whoever runs the suites: run them one after the other. Running Vitest a
 Playwright at the same time on a laptop starved both and produced spurious
 5-second timeouts.
 
+### After merging the navigation and palette commits (2026-10-10 20:40)
+
+The backend owner's eleven commits (sidebar, CSS variables, dependencies, tests)
+merged without conflicts. Observed on the merged branch: Biome 0 errors on 92
+files, typecheck pass, Vitest 15 files / 86 tests pass, Playwright demo flow and
+redirect pass. **The two WCAG scans fail** on contrast in the new palette tokens,
+which belong to `styles.css` and are not changed here. Pairs reported by axe
+(serious, AA needs 4.5:1), with values that would pass:
+
+| Where | Foreground on background | Ratio | Passing example |
+|---|---|---|---|
+| Primary buttons (sign in, new agent) | `#ffffff` on `--primary` `#a37764` | 3.9 | `--primary` `#8a5f4d` (5.5) |
+| Muted text on surfaces | `--muted-foreground` `#8a655a` on `#ebd6cb` / `#e4c7b8` | 3.7 / 3.2 | `--muted-foreground` `#6b4a40` (5.6) |
+| Sidebar kicker, 12px | `#837069` on `#ebd6cb` | 3.3 | follows the muted fix |
+| Active sidebar item | `--sidebar-accent-foreground` `#56453f` on `--sidebar-accent` `#c39e88` | 3.7 | foreground `#3f322d` (5.0) |
+
+Since the sidebar no longer renders an `aside`, the scan's exclusion of the
+navigation bar no longer applies; the sidebar's own pairs are listed above for
+its owner.
+
 Acceptance criteria: AC1 to AC7 all satisfied by the above. AC2, AC3, AC4, AC5 and
 AC6 are exercised directly by `e2e/demo-flow.spec.ts` plus the component suites;
 AC7 by the list-state tests in `agent-list.test.tsx` and the state handling in each
