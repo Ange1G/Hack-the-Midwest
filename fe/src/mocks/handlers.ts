@@ -5,11 +5,11 @@ import type { User } from "#/lib/api/schemas";
 import { agentInputSchema, credentialsSchema } from "#/lib/api/schemas";
 import {
 	advanceRun,
+	createAgent,
 	createRun,
+	createUser,
 	type MockAgent,
-	type MockUser,
 	mockState,
-	nextId,
 	now,
 	publicAgent,
 	publicUser,
@@ -56,17 +56,6 @@ function ownRun(user: User, id: string) {
 	const run = mockState.runs.find((item) => item.id === id);
 	if (!run) return undefined;
 	return ownAgent(user, run.agent_id) ? run : undefined;
-}
-
-function createUser(email: string, password: string): MockUser {
-	const user: MockUser = {
-		id: nextId("usr"),
-		email,
-		password,
-		created_at: now(),
-	};
-	mockState.users.push(user);
-	return user;
 }
 
 export const handlers = [
@@ -152,22 +141,7 @@ export const handlers = [
 				fieldErrors(parsed.error),
 			);
 		}
-		const timestamp = now();
-		const agent: MockAgent = {
-			id: nextId("agt"),
-			owner_id: user.id,
-			name: parsed.data.name,
-			instructions: parsed.data.instructions,
-			// Credentials are write-only: accepted here, never stored on the
-			// agent record the API returns.
-			tools: parsed.data.tools.map(({ kind, config }) => ({ kind, config })),
-			status: "active",
-			flagged: false,
-			last_run: null,
-			created_at: timestamp,
-			updated_at: timestamp,
-		};
-		mockState.agents.push(agent);
+		const agent = createAgent(user, parsed.data);
 		return HttpResponse.json(publicAgent(agent), { status: 201 });
 	}),
 

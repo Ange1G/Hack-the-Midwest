@@ -1,5 +1,6 @@
 import type {
 	Agent,
+	AgentInput,
 	Finding,
 	Run,
 	RunEvent,
@@ -59,6 +60,44 @@ export function publicUser(user: MockUser): User {
 export function publicAgent(agent: MockAgent): Agent {
 	const { owner_id: _ownerId, ...rest } = agent;
 	return rest;
+}
+
+export function createUser(email: string, password: string): MockUser {
+	const user: MockUser = {
+		id: nextId("usr"),
+		email,
+		password,
+		created_at: now(),
+	};
+	mockState.users.push(user);
+	return user;
+}
+
+export function createAgent(owner: User, input: AgentInput): MockAgent {
+	const timestamp = now();
+	const agent: MockAgent = {
+		id: nextId("agt"),
+		owner_id: owner.id,
+		name: input.name,
+		instructions: input.instructions,
+		// Credentials are write-only: accepted on input, never stored on the
+		// record the API returns.
+		tools: input.tools.map(({ kind, config }) => ({ kind, config })),
+		status: "active",
+		flagged: false,
+		last_run: null,
+		created_at: timestamp,
+		updated_at: timestamp,
+	};
+	mockState.agents.push(agent);
+	return agent;
+}
+
+// Drives a run through its whole lifecycle synchronously, for seeding and tests.
+export function runToCompletion(run: Run): void {
+	while (run.status === "queued" || run.status === "running") {
+		advanceRun(run);
+	}
 }
 
 export const toolDefinitions: ToolDefinition[] = [
