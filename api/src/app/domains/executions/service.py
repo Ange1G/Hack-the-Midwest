@@ -4,7 +4,7 @@ from typing import Any
 from app.common.pagination import clamp_page_size
 from app.core.auth import CurrentUser, ensure_caller_owns
 from app.core.config import Settings
-from app.core.exceptions import NotFoundError, UnauthorizedError
+from app.core.exceptions import AppError, NotFoundError, UnauthorizedError
 from app.domains.agents.models import Agent
 from app.domains.agents.repository import AgentRepository
 from app.domains.executions.models import AgentExecution, ExecutionStatus
@@ -28,11 +28,22 @@ class ExecutionService:
         agent_id: uuid.UUID,
         *,
         caller: CurrentUser,
+        settings: Settings,
     ) -> ExecutionRead:
         ensure_caller_owns(owner_user_sso, caller)
         agent = await self._agents.get_owned(owner_user_sso, agent_id)
         if agent is None:
             raise NotFoundError("Agent not found")
+        active = await self._executions.count_active_by_owner(owner_user_sso)
+        if active >= settings.max_active_executions_per_owner:
+            raise AppError(
+                code="too_many_executions",
+                message=(
+                    "Too many queued or running executions; "
+                    f"limit is {settings.max_active_executions_per_owner}"
+                ),
+                status_code=429,
+            )
         created = await self._executions.create(
             AgentExecution(
                 agent_id=agent.id,
