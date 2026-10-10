@@ -8,6 +8,8 @@ from app.core.exceptions import UnauthorizedError
 from app.domains.agents.controller import AgentsController
 from app.domains.agents.repository import SqlAlchemyAgentRepository
 from app.domains.agents.service import AgentService
+from app.core.exceptions import AppError
+from app.core.secrets import SecretCipher
 
 
 async def get_current_user(
@@ -37,3 +39,18 @@ async def get_agents_controller(
     settings: Settings = Depends(get_settings),
 ) -> AgentsController:
     return AgentsController(service=service, settings=settings)
+
+
+def get_secret_cipher(settings: Settings = Depends(get_settings)) -> SecretCipher | None:
+    """None when no key is configured; callers refuse to store credentials then."""
+    key = settings.secrets_encryption_key
+    if key is None or not key.get_secret_value():
+        return None
+    try:
+        return SecretCipher(key.get_secret_value())
+    except ValueError:
+        raise AppError(
+            code="secret_storage_misconfigured",
+            message="Credential storage is misconfigured on this server",
+            status_code=500,
+        ) from None

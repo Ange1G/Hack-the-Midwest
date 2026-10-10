@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, time
 
 from sqlalchemy import DateTime, Index, SmallInteger, String, Text, Time, func
+from sqlalchemy import ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,4 +38,41 @@ class Agent(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+
+class AgentSecret(Base):
+    """A credential from an agent's HTTP contract, encrypted at rest.
+
+    Kept out of `agents.configurations` so list and detail responses can never
+    include it. The worker decrypts it only when executing the contract.
+    """
+
+    __tablename__ = "agent_secrets"
+    __table_args__ = (
+        UniqueConstraint(
+            "agent_id",
+            "primitive_name",
+            "field_name",
+            name="uq_agent_secrets_agent_primitive_field",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+    )
+    agent_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    primitive_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    field_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
     )
