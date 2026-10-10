@@ -1,5 +1,7 @@
 # Agent Platform API
 
+Platform requirements and architecture: [../AGENTS.md](../AGENTS.md) and [../README.md](../README.md) at the repository root.
+
 FastAPI service with async SQLAlchemy and PostgreSQL.
 
 ## Prerequisites

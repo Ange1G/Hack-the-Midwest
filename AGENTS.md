@@ -1,5 +1,13 @@
 # Constitution
 
+## Required reading
+
+- **Platform overview and architecture:** [README.md](README.md) at the repository root.
+- **Requirements, SDLC, and quality:** this file ([AGENTS.md](AGENTS.md)).
+- **Feature work:** `spec/<YYYY-MM-DD>-<feature-name>/` (`task.md`, `plan.md`, `implementation.md`) before substantial implementation.
+
+Do **not** treat [api/README.md](api/README.md) or [fe/README.md](fe/README.md) as platform requirements—they are subsystem runbooks (setup, migrate, local commands). If nested agent instructions conflict with this file, **root AGENTS.md wins**.
+
 ## Requirements
 
 - **User accounts and isolation**
