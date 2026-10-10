@@ -10,7 +10,18 @@ CONTAINER_CPUS = "0.5"
 
 def docker_run_command(request: RunRequest) -> list[str]:
     name = container_name(request.execution_id)
-    return [
+    env = [
+        f"EXECUTION_ID={request.execution_id}",
+        f"AGENT_ID={request.agent_id}",
+        f"CALLBACK_URL={request.callback_url}",
+        f"CALLBACK_TOKEN={request.callback_token}",
+        f"AGENT_MANIFEST={json.dumps(request.agent_manifest)}",
+        f"OPENAI_MODEL={request.openai_model}",
+        "HOME=/tmp",
+    ]
+    if request.openai_api_key:
+        env.append(f"OPENAI_API_KEY={request.openai_api_key}")
+    command = [
         "docker",
         "run",
         "--rm",
@@ -29,18 +40,11 @@ def docker_run_command(request: RunRequest) -> list[str]:
         "no-new-privileges",
         "--add-host",
         "host.docker.internal:host-gateway",
-        "-e",
-        f"EXECUTION_ID={request.execution_id}",
-        "-e",
-        f"AGENT_ID={request.agent_id}",
-        "-e",
-        f"CALLBACK_URL={request.callback_url}",
-        "-e",
-        f"CALLBACK_TOKEN={request.callback_token}",
-        "-e",
-        f"AGENT_MANIFEST={json.dumps(request.agent_manifest)}",
-        request.image,
     ]
+    for item in env:
+        command.extend(["-e", item])
+    command.append(request.image)
+    return command
 
 
 def container_name(execution_id: object) -> str:
