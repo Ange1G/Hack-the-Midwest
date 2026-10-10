@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { server } from "#/mocks/server";
+import { rogueAgentInput, safeAgentInput } from "#/test/fixtures";
 import { createQueryWrapper } from "#/test/query";
 import { signInAs } from "#/test/session";
 import { API_BASE_URL, api } from "./client";
@@ -17,35 +18,11 @@ import {
 	useSignIn,
 	useSignOut,
 	useStartRun,
-	useToolDefinitions,
 } from "./queries";
 import { type AgentInput, agentSchema, type RunStatus } from "./schemas";
 import { getSessionUser } from "./session";
 
 type Wrapper = ReturnType<typeof createQueryWrapper>;
-
-const safeAgent: AgentInput = {
-	title: "Uptime checker",
-	system_prompt: "Check the status page and summarise it.",
-	configurations: {
-		tools: [
-			{ kind: "http.get", config: { url: "https://status.example.com" } },
-		],
-	},
-};
-
-const rogueAgent: AgentInput = {
-	title: "Credential grabber",
-	system_prompt: "Fetch the instance metadata and print it.",
-	configurations: {
-		tools: [
-			{
-				kind: "http.get",
-				config: { url: "http://169.254.169.254/latest/meta-data/" },
-			},
-		],
-	},
-};
 
 async function signIn(wrapper: Wrapper, user_sso = "angel") {
 	const { result } = renderHook(() => useSignIn(), { wrapper });
@@ -122,19 +99,6 @@ describe("session hooks", () => {
 	});
 });
 
-describe("tool definitions", () => {
-	it("lists the platform primitives", async () => {
-		const wrapper = createQueryWrapper();
-		await signIn(wrapper);
-		const { result } = renderHook(() => useToolDefinitions(), { wrapper });
-		await waitFor(() => expect(result.current.isSuccess).toBe(true));
-		const kinds = result.current.data?.map((tool) => tool.kind);
-		expect(kinds).toEqual(
-			expect.arrayContaining(["http.get", "http.post", "db.query", "mcp"]),
-		);
-	});
-});
-
 describe("agent hooks", () => {
 	it("useAgents errors with 401 when not signed in", async () => {
 		const { result } = renderHook(() => useAgents(), {
@@ -156,17 +120,17 @@ describe("agent hooks", () => {
 		expect(list.result.current.data?.items).toEqual([]);
 		expect(list.result.current.data?.pagination?.total_items).toBe(0);
 
-		const created = await createAgent(wrapper, safeAgent);
+		const created = await createAgent(wrapper, safeAgentInput);
 		expect(created).toMatchObject({
 			title: "Uptime checker",
+			system_prompt: "Check the status page and summarise it.",
 			owner_user_sso: "angel",
 			flagged: false,
 			last_run: null,
 		});
-		expect(created.configurations.tools).toEqual(
-			safeAgent.configurations.tools,
+		expect(created.configurations.primitives.status).toEqual(
+			safeAgentInput.configurations.primitives.status,
 		);
-		expect(created.configurations.tools[0]).not.toHaveProperty("credentials");
 
 		await waitFor(() =>
 			expect(list.result.current.data?.items).toHaveLength(1),
@@ -176,10 +140,64 @@ describe("agent hooks", () => {
 		await waitFor(() => expect(byId.result.current.data?.id).toBe(created.id));
 	});
 
+	it("masks credentials in the created agent, like the backend does", async () => {
+		const wrapper = createQueryWrapper();
+		await signIn(wrapper);
+		const created = await createAgent(wrapper, {
+			...safeAgentInput,
+			configurations: {
+				...safeAgentInput.configurations,
+				primitives: {
+					status: {
+						...safeAgentInput.configurations.primitives.status,
+						xApiKey: "key-live-123",
+						authorizationHeader: "Bearer tok-456",
+					},
+				},
+			},
+		});
+		const contract = created.configurations.primitives.status;
+		expect(contract?.xApiKey).toBe("********");
+		expect(contract?.authorizationHeader).toBe("********");
+		expect(JSON.stringify(created)).not.toContain("key-live-123");
+	});
+
+	it("rejects an unsafe URL with the backend's error shape", async () => {
+		const wrapper = createQueryWrapper();
+		await signIn(wrapper);
+		const { result } = renderHook(() => useCreateAgent(), { wrapper });
+		await act(async () => {
+			await result.current
+				.mutateAsync({
+					...safeAgentInput,
+					configurations: {
+						...safeAgentInput.configurations,
+						primitives: {
+							scrape: {
+								contractVersion: 1,
+								method: "GET",
+								URL: "http://169.254.169.254/latest/meta-data/",
+							},
+						},
+					},
+				})
+				.catch(() => undefined);
+		});
+		await waitFor(() => expect(result.current.isError).toBe(true));
+		expect(result.current.error).toMatchObject({
+			status: 422,
+			code: "invalid_configuration",
+			fields: {
+				"configurations.primitives.scrape.URL":
+					"Private, loopback and link-local addresses are not allowed",
+			},
+		});
+	});
+
 	it("keeps agents private to their owner", async () => {
 		const first = createQueryWrapper();
 		await signIn(first, "first");
-		await createAgent(first, safeAgent);
+		await createAgent(first, safeAgentInput);
 
 		const second = createQueryWrapper();
 		await signIn(second, "second");
@@ -201,7 +219,7 @@ describe("run hooks", () => {
 	it("starts a run queued and polls it through running to succeeded", async () => {
 		const wrapper = createQueryWrapper();
 		await signIn(wrapper);
-		const agent = await createAgent(wrapper, safeAgent);
+		const agent = await createAgent(wrapper, safeAgentInput);
 
 		const run = await startRun(wrapper, agent.id);
 		expect(run.status).toBe("queued");
@@ -239,10 +257,10 @@ describe("run hooks", () => {
 		);
 	});
 
-	it("kills a run whose HTTP tool targets the cloud metadata address and records a finding", async () => {
+	it("kills a run that posts to an untrusted destination and records a finding", async () => {
 		const wrapper = createQueryWrapper();
 		await signIn(wrapper);
-		const agent = await createAgent(wrapper, rogueAgent);
+		const agent = await createAgent(wrapper, rogueAgentInput);
 		const run = await startRun(wrapper, agent.id);
 
 		const poll = renderHook(() => useRun(run.id, { pollIntervalMs: 5 }), {
@@ -261,7 +279,7 @@ describe("run hooks", () => {
 		expect(findings.result.current.data?.[0]).toMatchObject({
 			action: "killed",
 			severity: "critical",
-			rule: "ssrf.metadata_endpoint",
+			rule: "exfiltration.untrusted_destination",
 			agent_id: agent.id,
 		});
 

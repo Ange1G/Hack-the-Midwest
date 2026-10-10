@@ -2,9 +2,9 @@
 
 Feature: `spec/2026-10-10-frontend-dashboard/task.md`
 Branch: `feat/frontend-dashboard`
-Status: skeleton complete, revised after backend-owner review, and aligned with the
-backend's API contract; awaiting styling pass and the backend's remaining endpoints
-(2026-10-10)
+Status: skeleton complete, revised after backend-owner review, aligned with the
+backend's API contract including the create endpoint on `feat/agent_create_http`;
+awaiting styling pass and the backend's remaining endpoints (2026-10-10)
 
 ## Progress log
 
@@ -30,6 +30,14 @@ backend's API contract; awaiting styling pass and the backend's remaining endpoi
   `title` / `system_prompt` / `configurations` fields. Sign-in replaces login and
   signup. The mock mirrors the implemented endpoint exactly and extends it with
   the proposed ones. Tests rewritten first, then the code; all green.
+- 2026-10-10 20:15: create contract adopted from `feat/agent_create_http` (step 10):
+  camelCase body, named HTTP contracts inside `configurations.primitives`,
+  schedule arrays, credentials inside the contract and masked on read, the
+  backend's save-time URL refusal mirrored in the builder and the mock, and its
+  `invalid_configuration` error shape mapped onto the right field. Builder
+  rebuilt as an HTTP-call editor. Demo flow updated: the metadata-scraping agent
+  is now refused at creation; a second agent that posts to an untrusted collector
+  is killed at run time by the mock's monitor.
 
 ## Decisions made during implementation
 
@@ -150,14 +158,46 @@ than driven by the `:root` variables in `styles.css`.
   empty states and loading skeletons now use `.island-shell` (and `--line` for
   skeleton bars), so the pages take their surfaces from the palette.
 
-## Test results (observed 2026-10-10 18:30, Windows 11, Node 24)
+## Create contract (feat/agent_create_http, 2026-10-10)
+
+Decision: build to the create endpoint on the backend owner's unmerged branch now,
+because it encodes the team spec and its tests pin the exact JSON; the three
+contract files absorb any review changes.
+
+- **`src/lib/http-contract.ts`** mirrors the backend's rules: `unsafeUrlReason`
+  reproduces the save-time SSRF guard (private, loopback, link-local, multicast,
+  reserved and IPv4-mapped addresses; `localhost`, `.local`, `.internal`, `.lan`,
+  `.home.arpa` and dotless hostnames) with the backend's messages, so the builder
+  refuses what the API would refuse before a request is made; limits (retries,
+  timeout, credential length, primitive count, name pattern) are the backend's.
+- **Builder** (`agent-form.tsx`): name and instructions via TanStack Form; HTTP
+  calls as local drafts (call name, method, URL, JSON payload for POST, API key,
+  authorization header, retries, timeout); schedule as day checkboxes, HH:MM
+  times (converted to minutes after midnight) and an optional month. The body is
+  validated with `agentInputSchema` and every issue, local or from the server's
+  `invalid_configuration` details, is shown under the field it names.
+- **Mock**: `POST /agents/{sso}` validates with the same schema, answers
+  `validation_error` (pydantic shape) for body fields and `invalid_configuration`
+  (`{ field, message }`) for configuration fields, stores credentials as
+  `"********"` and omits unset fields, exactly like the backend's responses.
+- **Monitor rule** (mock only): unsafe URLs can no longer be saved, so the
+  run-time check now kills a run whose first call targets a destination commonly
+  used to collect exfiltrated data (`exfiltration.untrusted_destination`).
+- MCP and database primitives are not in the team's contract yet, so the builder
+  offers HTTP calls only; the DevRev demo agent uses an HTTP POST contract.
+
+## Test results (observed 2026-10-10 20:15, Windows 11, Node 24)
 
 | Check | Result |
 |---|---|
 | `npm run typecheck` | pass |
-| `npm run check` (Biome, 77 files) | 0 errors, 1 info |
-| `npm test` (Vitest) | 13 files, 66 tests, all pass |
-| `npm run test:e2e` (Playwright, chromium) | 4 tests, all pass: demo flow 15.7 s, redirect, two WCAG AA scans across 6 screens |
+| `npm run check` (Biome, 79 files) | 0 errors, 1 info |
+| `npm test` (Vitest) | 14 files, 82 tests, all pass |
+| `npm run test:e2e` (Playwright, chromium) | 4 tests, all pass: demo flow 19.0 s (create, run, refusal, kill), redirect, two WCAG AA scans across 6 screens |
+
+Note for whoever runs the suites: run them one after the other. Running Vitest and
+Playwright at the same time on a laptop starved both and produced spurious
+5-second timeouts.
 
 Acceptance criteria: AC1 to AC7 all satisfied by the above. AC2, AC3, AC4, AC5 and
 AC6 are exercised directly by `e2e/demo-flow.spec.ts` plus the component suites;
@@ -176,11 +216,15 @@ page component.
 
 ## Known limitations and follow-ups
 
-- **Backend coverage.** Only `GET /api/v1/agents/{user_sso}` exists on the
-  backend. Against the real API the agents list and sign-in work; creating an
-  agent, agent detail, runs, events, findings, and tool definitions still need
-  the endpoints marked *proposed* in `plan.md`. Until then those screens work in
-  mock mode only.
+- **Backend coverage.** `GET /api/v1/agents/{user_sso}` is on `main`;
+  `POST /api/v1/agents/{user_sso}` is on `feat/agent_create_http` awaiting review.
+  Against the real API, sign-in, the agents list, and creating an agent work;
+  agent detail, runs, events, and findings still need the endpoints marked
+  *proposed* in `plan.md`. Until then those screens work in mock mode only.
+- **For the backend owner's branch**: `api/.env` is committed there (it holds only
+  the local database URL, but it should be untracked), and every frontend file on
+  that branch changed line endings; this branch's `.gitattributes` plus
+  `merge.renormalize` keep the merge clean.
 - **Proposed endpoints may land differently.** `schemas.ts`, `client.ts`, and
   `queries.ts` are the only files that should need to change.
 - The global `a` colour in `styles.css` (`--lagoon-deep`) is 3.8:1 on the light

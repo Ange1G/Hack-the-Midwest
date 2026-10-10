@@ -44,18 +44,19 @@ test("signed-in screens have no serious accessibility violations", async ({
 	await expect(
 		page.getByRole("heading", { name: "Agents", exact: true }),
 	).toBeVisible();
-	await expect(page.getByRole("link", { name: "Metadata scraper" })).toBeVisible();
+	await expect(page.getByRole("link", { name: "Secret leaker" })).toBeVisible();
 	await expectAccessible(page, "agents list");
 
 	await page.getByRole("link", { name: "New agent" }).click();
-	await page.getByRole("checkbox", { name: "HTTP GET" }).click();
-	await expect(page.getByLabel("URL", { exact: true })).toBeVisible();
+	await page.getByRole("button", { name: "Add HTTP call" }).click();
+	await page.getByLabel("Method").selectOption("POST");
+	await expect(page.getByLabel("Payload (JSON)")).toBeVisible();
 	await expectAccessible(page, "agent builder");
 
 	await page.getByRole("link", { name: "Agents", exact: true }).click();
-	await page.getByRole("link", { name: "Metadata scraper" }).click();
+	await page.getByRole("link", { name: "Secret leaker" }).click();
 	await expect(
-		page.getByRole("heading", { name: "Metadata scraper" }),
+		page.getByRole("heading", { name: "Secret leaker" }),
 	).toBeVisible();
 	await expectAccessible(page, "agent detail");
 
@@ -67,6 +68,6 @@ test("signed-in screens have no serious accessibility violations", async ({
 	await expectAccessible(page, "killed run");
 
 	await page.getByRole("link", { name: "Security" }).click();
-	await expect(page.getByText("ssrf.metadata_endpoint")).toBeVisible();
+	await expect(page.getByText("exfiltration.untrusted_destination")).toBeVisible();
 	await expectAccessible(page, "security findings");
 });

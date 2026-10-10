@@ -1,10 +1,21 @@
 import { z } from "zod";
+import {
+	CONTRACT_VERSION,
+	MAX_CREDENTIAL_LENGTH,
+	MAX_PRIMITIVES_PER_AGENT,
+	MAX_RETRIES,
+	MAX_SYSTEM_PROMPT_LENGTH,
+	MAX_TIMEOUT_MS,
+	MIN_TIMEOUT_MS,
+	PRIMITIVE_NAME_MESSAGE,
+	PRIMITIVE_NAME_PATTERN,
+	SECRET_PLACEHOLDER,
+	unsafeUrlReason,
+} from "#/lib/http-contract";
 
-// Contract v1, aligned with the backend. See
-// spec/2026-10-10-frontend-dashboard/plan.md. Keep this file the single place
-// that knows the wire shape of the API.
-
-const stringRecord = z.record(z.string(), z.string());
+// Contract v2, aligned with the backend and the team spec. See
+// spec/2026-10-10-frontend-dashboard/plan.md and api/README.md. Keep this
+// file the single place that knows the wire shape of the API.
 
 // Envelope (api/src/app/common/envelope.py)
 
@@ -45,47 +56,35 @@ export const signInInputSchema = z.object({
 });
 export type SignInInput = z.infer<typeof signInInputSchema>;
 
-// Tools
+// HTTP contract (team spec; api/src/app/domains/primitives/http_contract.py)
 
-export const toolKindSchema = z.enum([
-	"http.get",
-	"http.post",
-	"db.query",
-	"mcp",
-]);
-export type ToolKind = z.infer<typeof toolKindSchema>;
+export const httpMethodSchema = z.enum(["GET", "POST"]);
+export type HttpMethod = z.infer<typeof httpMethodSchema>;
 
-export const toolFieldSchema = z.object({
-	key: z.string(),
-	label: z.string(),
-	type: z.enum(["text", "url", "textarea"]),
-	required: z.boolean(),
+export const httpOptionsSchema = z.object({
+	retries: z.number().int().min(0).max(MAX_RETRIES).nullable().optional(),
+	timeout: z
+		.number()
+		.int()
+		.min(MIN_TIMEOUT_MS)
+		.max(MAX_TIMEOUT_MS)
+		.nullable()
+		.optional(),
 });
-export type ToolField = z.infer<typeof toolFieldSchema>;
+export type HttpOptions = z.infer<typeof httpOptionsSchema>;
 
-export const toolDefinitionSchema = z.object({
-	kind: toolKindSchema,
-	name: z.string(),
-	description: z.string(),
-	config_fields: z.array(toolFieldSchema),
-	credential_fields: z.array(z.object({ key: z.string(), label: z.string() })),
+// As stored and returned: credentials come back as the placeholder, and
+// fields the backend left unset are absent.
+export const httpContractSchema = z.object({
+	contractVersion: z.literal(CONTRACT_VERSION),
+	method: httpMethodSchema,
+	URL: z.string(),
+	payload: z.unknown().optional(),
+	xApiKey: z.string().nullable().optional(),
+	authorizationHeader: z.string().nullable().optional(),
+	options: httpOptionsSchema.nullable().optional(),
 });
-export type ToolDefinition = z.infer<typeof toolDefinitionSchema>;
-
-// Unknown keys are stripped, so a leaky response never carries credentials
-// into the UI.
-export const toolConfigSchema = z.object({
-	kind: toolKindSchema,
-	config: stringRecord,
-});
-export type ToolConfig = z.infer<typeof toolConfigSchema>;
-
-// Write-only: sent on create, kept out of `configurations`, never returned.
-export const toolCredentialsSchema = z.object({
-	tool: toolKindSchema,
-	values: stringRecord,
-});
-export type ToolCredentials = z.infer<typeof toolCredentialsSchema>;
+export type HttpContract = z.infer<typeof httpContractSchema>;
 
 // Runs
 
@@ -108,12 +107,23 @@ export type RunSummary = z.infer<typeof runSummarySchema>;
 
 // Agents (AgentRead in the backend)
 
-// `configurations` is untyped JSON on the backend. The frontend's convention is
-// `{ tools: ToolConfig[] }`; anything else renders as an agent with no tools
-// rather than failing the whole list.
+// Read leniently: an agent whose stored configuration predates the schema
+// renders with no calls and no schedule rather than failing the whole list.
 export const agentConfigurationsSchema = z
-	.object({ tools: z.array(toolConfigSchema).catch([]) })
-	.catch({ tools: [] });
+	.object({
+		primitives: z.record(z.string(), httpContractSchema).catch({}),
+		month: z
+			.number()
+			.int()
+			.min(1)
+			.max(12)
+			.nullable()
+			.optional()
+			.catch(undefined),
+		dayOfWeek: z.array(z.number().int().min(0).max(6)).catch([]),
+		timeOfDay: z.array(z.number().int().min(0).max(1439)).catch([]),
+	})
+	.catch({ primitives: {}, dayOfWeek: [], timeOfDay: [] });
 export type AgentConfigurations = z.infer<typeof agentConfigurationsSchema>;
 
 export const agentSchema = z.object({
@@ -133,15 +143,135 @@ export const agentSchema = z.object({
 });
 export type Agent = z.infer<typeof agentSchema>;
 
+// Create body (POST /agents/{user_sso}; camelCase per the team spec)
+
+const credentialSchema = z
+	.string()
+	.min(1, "Enter the credential")
+	.max(
+		MAX_CREDENTIAL_LENGTH,
+		`Keep credentials under ${MAX_CREDENTIAL_LENGTH} characters`,
+	)
+	.refine(
+		(value) => value !== SECRET_PLACEHOLDER,
+		"Provide the actual credential, not the placeholder",
+	);
+
+export const httpContractInputSchema = z
+	.object({
+		contractVersion: z.literal(CONTRACT_VERSION),
+		method: httpMethodSchema,
+		URL: z
+			.string()
+			.min(1, "URL is required")
+			.superRefine((value, ctx) => {
+				if (!value) return;
+				const reason = unsafeUrlReason(value);
+				if (reason) ctx.addIssue({ code: "custom", message: reason });
+			}),
+		payload: z.unknown().optional(),
+		xApiKey: credentialSchema.optional(),
+		authorizationHeader: credentialSchema.optional(),
+		options: z
+			.object({
+				retries: z
+					.number()
+					.int("Retries must be a whole number")
+					.min(0, `Retries must be between 0 and ${MAX_RETRIES}`)
+					.max(MAX_RETRIES, `Retries must be between 0 and ${MAX_RETRIES}`)
+					.optional(),
+				timeout: z
+					.number()
+					.int("Timeout must be a whole number of milliseconds")
+					.min(
+						MIN_TIMEOUT_MS,
+						`Timeout must be between ${MIN_TIMEOUT_MS} and ${MAX_TIMEOUT_MS} ms`,
+					)
+					.max(
+						MAX_TIMEOUT_MS,
+						`Timeout must be between ${MIN_TIMEOUT_MS} and ${MAX_TIMEOUT_MS} ms`,
+					)
+					.optional(),
+			})
+			.optional(),
+	})
+	.superRefine((contract, ctx) => {
+		if (contract.method === "GET" && contract.payload !== undefined) {
+			ctx.addIssue({
+				code: "custom",
+				path: ["payload"],
+				message:
+					"GET requests cannot include a payload; put parameters in the URL",
+			});
+		}
+	});
+export type HttpContractInput = z.infer<typeof httpContractInputSchema>;
+
+// Names are validated here rather than as record keys so the message and the
+// issue path (the offending name) are ours.
+const primitivesInputSchema = z
+	.record(z.string(), httpContractInputSchema)
+	.superRefine((primitives, ctx) => {
+		const names = Object.keys(primitives);
+		for (const name of names) {
+			if (!PRIMITIVE_NAME_PATTERN.test(name)) {
+				ctx.addIssue({
+					code: "custom",
+					path: [name],
+					message: PRIMITIVE_NAME_MESSAGE,
+				});
+			}
+		}
+		if (names.length > MAX_PRIMITIVES_PER_AGENT) {
+			ctx.addIssue({
+				code: "custom",
+				message: `At most ${MAX_PRIMITIVES_PER_AGENT} HTTP calls per agent`,
+			});
+		}
+	});
+
 export const agentInputSchema = z.object({
-	title: z
+	agentTitle: z
 		.string()
 		.trim()
 		.min(1, "Name is required")
 		.max(255, "Keep the name under 255 characters"),
-	system_prompt: z.string().trim().min(1, "Instructions are required"),
-	configurations: z.object({ tools: z.array(toolConfigSchema) }),
-	credentials: z.array(toolCredentialsSchema).optional(),
+	systemPrompt: z
+		.string()
+		.trim()
+		.min(1, "Instructions are required")
+		.max(
+			MAX_SYSTEM_PROMPT_LENGTH,
+			`Keep the instructions under ${MAX_SYSTEM_PROMPT_LENGTH} characters`,
+		),
+	configurations: z.object({
+		primitives: primitivesInputSchema,
+		month: z
+			.number()
+			.int()
+			.min(1, "Month must be between 1 and 12")
+			.max(12, "Month must be between 1 and 12")
+			.nullable()
+			.optional(),
+		dayOfWeek: z
+			.array(
+				z
+					.number()
+					.int()
+					.min(0, "Days are 0 (Sunday) to 6 (Saturday)")
+					.max(6, "Days are 0 (Sunday) to 6 (Saturday)"),
+			)
+			.max(7),
+		timeOfDay: z
+			.array(
+				z
+					.number()
+					.int()
+					.min(0, "Times are minutes after midnight, 0 to 1439")
+					.max(1439, "Times are minutes after midnight, 0 to 1439"),
+			)
+			.max(48, "At most 48 times per day"),
+	}),
 });
 export type AgentInput = z.infer<typeof agentInputSchema>;
 

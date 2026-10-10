@@ -10,9 +10,10 @@ Branch: `feat/frontend-dashboard`
 - One route (`/`) with placeholder content. Palette tokens live in `fe/src/styles.css`.
 - Path alias `#/*` maps to `src/*` through the package.json `imports` field.
 - Not present: TanStack Query, any test tooling, any API layer, any app components.
-- Backend (`api/`, merged from `main` later the same day): FastAPI with a response
-  envelope, `/api/v1` prefix, development auth header, and `GET /api/v1/agents/{user_sso}`.
-  See `spec/2026-10-10-fastapi-agents-scaffold/`.
+- Backend (`api/`): FastAPI with a response envelope, `/api/v1` prefix, development
+  auth header, `GET /api/v1/agents/{user_sso}` (on `main`) and
+  `POST /api/v1/agents/{user_sso}` with typed configurations and encrypted credentials
+  (branch `feat/agent_create_http`, see `spec/2026-10-10-agent-create-http-contract/`).
 
 ## Layout proposal
 
@@ -27,9 +28,9 @@ Pages:
 | Route | Content |
 |---|---|
 | `/login` | Centered card: development sign-in with the SSO id the API should trust. |
-| `/agents` | Agent list (TanStack Table): title, tool chips, last run status badge, flagged marker. "New agent" action. Empty state with the same action. |
-| `/agents/new` | Builder: name, instructions, tool picker (checklist of tool definitions with per-tool config and credential inputs). |
-| `/agents/$agentId` | Header with title, Run button. Tabs: Overview (instructions, tools) and Runs (history table). |
+| `/agents` | Agent list (TanStack Table): title, HTTP call chips, last run status badge, flagged marker. "New agent" action. Empty state with the same action. |
+| `/agents/new` | Builder: name, instructions, HTTP calls (name, method, URL, payload, credentials, retries, timeout), schedule (days, times, month). |
+| `/agents/$agentId` | Header with title, Run button. Tabs: Overview (instructions, HTTP calls, schedule) and Runs (history table). |
 | `/runs/$runId` | Status header with a queued, started, finished timeline. Output panel. Event log. Killed banner with the finding when applicable. |
 | `/security` | Findings table with severity badges and links to the run and the agent. |
 
@@ -48,51 +49,55 @@ fe/src/
   components/ui/            shadcn primitives
   components/               AppShell, PageHeader, DataTable, ToneBadge, Notice, StatusBadge,
                             states (Loading/Empty/Error), auth/, agents/, runs/, security/
-  lib/api/
-    client.ts               fetch wrapper: base URL, identity header, envelope unwrapping,
-                            zod parse, ApiError
-    schemas.ts              zod schemas and inferred types (the contract)
-    session.ts              development identity (X-Dev-User-SSO) kept in sessionStorage
-    queries.ts              query keys and hooks
+  lib/
+    http-contract.ts        the team's HTTP contract rules (URL safety, limits, time helpers)
+    api/client.ts           fetch wrapper: base URL, identity header, envelope unwrapping,
+                            zod parse, ApiError with per-field messages
+    api/schemas.ts          zod schemas and inferred types (the contract)
+    api/session.ts          development identity (X-Dev-User-SSO) kept in sessionStorage
+    api/queries.ts          query keys and hooks
   mocks/
     handlers.ts             MSW handlers mirroring the backend contract plus proposed endpoints
-    state.ts                in-memory state, run lifecycle, deterministic security rule
+    state.ts                in-memory state, run lifecycle, deterministic monitor rule
     seed.ts, demo-account.ts, browser.ts, server.ts
   test/
-    setup.ts, render.tsx, query.tsx, session.ts
+    setup.ts, render.tsx, query.tsx, session.ts, fixtures.ts
 ```
 
-State: server state in TanStack Query, form state in TanStack Form, UI state local. No
-global store.
+State: server state in TanStack Query, form state in TanStack Form plus local state for
+the dynamic HTTP-call drafts, UI state local. No global store.
 
 Data flow: components call hooks from `queries.ts`; hooks call `client.ts`; the client
 adds the identity header, unwraps the envelope, parses `data` with the schema for that
 endpoint, and throws `ApiError` from the envelope's `error` on non-2xx. In mock mode MSW
 intercepts the same fetch calls, so the client code under test is the code that ships.
 
-## API contract v1 (aligned with the backend on 2026-10-10)
+## API contract v2 (aligned with the backend and the team spec, 2026-10-10)
 
-Source of truth for what exists: `api/src/app` and `api/tests/integration`. Rows marked
-*proposed* are what the frontend and the mock expect for endpoints the backend has not
-built yet; they follow the backend's conventions so they can be adopted as is or
-amended here first.
+Source of truth for what exists: `api/src/app` and `api/tests`. Rows marked *proposed*
+are what the frontend and the mock expect for endpoints the backend has not built yet;
+they follow the backend's conventions so they can be adopted as is or amended here
+first.
 
 Conventions (from the backend):
 
 - Base path `/api/v1` (`VITE_API_URL`, default `http://localhost:8000/api/v1`).
 - Every response is `{ "data": T | null, "error": ApiError | null, "metadata": { "request_id" }, "pagination": Pagination | null }`.
 - Errors: `error.code` in `unauthorized` (401), `forbidden` (403), `not_found` (404),
-  `validation_error` (422, `details.errors` holds pydantic issues with `loc` and `msg`),
-  `http_error` otherwise.
+  `validation_error` (422, pydantic issues in `details.errors[]` with `loc` and `msg`),
+  `invalid_configuration` (422, `details.errors[]` with `field` and `message`, never the
+  submitted value), `secret_storage_unavailable` (503), `http_error` otherwise.
 - Development auth: header `X-Dev-User-SSO: <user_sso>`. Paths that embed `{user_sso}`
   must match the header or the API returns 403.
 - Lists take `page` (default 1) and `page_size` (default 20, max 100) and return
   `pagination: { page, page_size, total_items, total_pages }`.
+- Request bodies and `configurations` are camelCase (team spec); `AgentRead` and the
+  envelope are snake_case.
 
 | Method | Path | Body | Response `data` | Status |
 |---|---|---|---|---|
 | GET | `/agents/{user_sso}?page&page_size` | | `Agent[]` + pagination | implemented |
-| POST | `/agents/{user_sso}` | `AgentInput` | `Agent` (201) | proposed |
+| POST | `/agents/{user_sso}` | `AgentInput` | `Agent` (201) | implemented on `feat/agent_create_http` |
 | GET | `/agents/{user_sso}/{agent_id}` | | `Agent` | proposed |
 | DELETE | `/agents/{user_sso}/{agent_id}` | | 204 | proposed |
 | GET | `/agents/{user_sso}/{agent_id}/runs?page&page_size` | | `Run[]` + pagination | proposed |
@@ -101,17 +106,41 @@ Conventions (from the backend):
 | GET | `/runs/{run_id}/events` | | `RunEvent[]` | proposed |
 | POST | `/runs/{run_id}/cancel` | | `Run` | proposed |
 | GET | `/security/findings?agent_id&run_id` | | `Finding[]` | proposed |
-| GET | `/tools` | | `ToolDefinition[]` | proposed |
 
 ```ts
-type Agent = {                       // AgentRead in the backend
+// HTTP contract (team spec). Field names are the wire names.
+type HttpContract = {
+  contractVersion: 1
+  method: "GET" | "POST"
+  URL: string                        // http/https; private, loopback, link-local, metadata and
+                                     // internal hostnames are refused at save time
+  payload?: unknown                  // JSON; not allowed with GET
+  xApiKey?: string                   // credential: encrypted at rest, returned as "********"
+  authorizationHeader?: string       // credential: same handling
+  options?: { retries?: number /* 0..5 */; timeout?: number /* 100..60000 ms */ }
+}
+
+type AgentConfigurations = {
+  primitives: Record<string, HttpContract>   // names match ^[a-z][a-z0-9_]{0,63}$, at most 20
+  month?: number | null                      // 1..12
+  dayOfWeek: number[]                        // 0 = Sunday .. 6 = Saturday
+  timeOfDay: number[]                        // minutes after midnight, 540 = 09:00
+}
+
+type AgentInput = {                  // POST body; backend also accepts agentTile/title and system_prompt
+  agentTitle: string                 // 1..255
+  systemPrompt: string               // 1..20000
+  configurations: AgentConfigurations
+}
+
+type Agent = {                       // AgentRead
   id: string                         // uuid
   title: string
   system_prompt: string
-  configurations: { tools: ToolConfig[] }   // JSONB; see the convention below
-  schedule_month: number | null
+  configurations: AgentConfigurations   // credentials masked; unset fields absent
+  schedule_month: number | null      // legacy columns, null for new agents
   schedule_day: number | null
-  schedule_time: string | null       // "HH:MM:SS"
+  schedule_time: string | null
   owner_user_sso: string
   created_at: string
   updated_at: string
@@ -121,25 +150,6 @@ type Agent = {                       // AgentRead in the backend
   last_run?: { id: string; status: RunStatus; created_at: string } | null
 }
 
-type ToolKind = "http.get" | "http.post" | "db.query" | "mcp"
-type ToolConfig = { kind: ToolKind; config: Record<string, string> }
-
-type AgentInput = {                  // proposed body for POST /agents/{user_sso}
-  title: string
-  system_prompt: string
-  configurations: { tools: ToolConfig[] }
-  credentials?: { tool: ToolKind; values: Record<string, string> }[]
-  // write-only: must be stored in a secret store, never inside configurations
-}
-
-type ToolDefinition = {
-  kind: ToolKind
-  name: string
-  description: string
-  config_fields: { key: string; label: string; type: "text" | "url" | "textarea"; required: boolean }[]
-  credential_fields: { key: string; label: string }[]
-}
-
 type RunStatus = "queued" | "running" | "succeeded" | "failed" | "killed" | "cancelled"
 type Run = { id; agent_id; status: RunStatus; output: string | null; error: string | null;
              finding_id: string | null; created_at; started_at: string | null; finished_at: string | null }
@@ -147,17 +157,16 @@ type RunEvent = { id; run_id; ts; type: "log" | "tool_call" | "tool_result" | "s
 type Finding = { id; run_id; agent_id; severity: "low" | "medium" | "high" | "critical"; rule; message; action: "flagged" | "killed"; created_at }
 ```
 
-`configurations.tools` convention: the backend keeps `configurations` as untyped JSON
-and lists "typed Pydantic models for configurations" as a follow-up. The frontend reads
-and writes `configurations.tools` as `ToolConfig[]` and ignores anything it cannot
-parse (an agent with other content renders with no tools rather than failing). This is
-the shape proposed for that follow-up.
+The frontend reads `configurations` leniently: an agent whose stored JSON does not match
+the schema renders with no calls and no schedule instead of failing the list.
 
-Mock security rule (deterministic, mirrors the constitution's "enforce deterministically
-where possible"): a run is killed when any HTTP tool config targets a private or
-metadata address (`169.254.169.254`, `localhost`, `127.0.0.1`, `10.*`, `192.168.*`).
-The mock emits a `security` event, sets the run to `killed`, creates a `critical`
-finding with rule `ssrf.metadata_endpoint`, and marks the agent `flagged`.
+Mock monitor rule (deterministic, mirrors the constitution's "enforce deterministically
+where possible"): unsafe URLs are already refused at save time, so the run-time check
+watches where data goes. A run whose first HTTP call targets a destination commonly used
+to collect exfiltrated data (for example `webhook.site`, `ngrok` hosts, `pastebin.com`)
+is killed: the mock emits a `security` event, sets the run to `killed`, creates a
+`critical` finding with rule `exfiltration.untrusted_destination`, and marks the agent
+`flagged`.
 
 ## Implementation steps
 
@@ -175,6 +184,8 @@ Each step is test-first and ends in a commit.
 8. Review round: TanStack Table, contrast-safe badges, automated accessibility scan.
 9. Contract alignment with the backend (envelope, base path, identity header, agent
    field names); mock mirrors the backend and extends it with the proposed endpoints.
+10. Create contract: HTTP calls, schedule, credential masking, save-time URL refusal,
+    the backend's configuration error shape; builder rebuilt as an HTTP-call editor.
 
 ## Validation strategy
 
@@ -188,3 +199,5 @@ Each step is test-first and ends in a commit.
   `client.ts`, and `queries.ts` are the only files that should need to change.
 - Production authentication is undefined on the backend; the development identity
   header is the only mechanism today.
+- The create endpoint is on an unmerged branch awaiting review; if review changes
+  the contract, the same three files absorb it.

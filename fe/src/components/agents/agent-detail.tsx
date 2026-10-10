@@ -4,15 +4,31 @@ import { PageHeader } from "#/components/layout/page";
 import { Notice } from "#/components/notice";
 import { EmptyState, ErrorState, LoadingState } from "#/components/states";
 import { StatusBadge } from "#/components/status-badge";
-import { Badge } from "#/components/ui/badge";
+import { ToneBadge } from "#/components/tone-badge";
 import { Button } from "#/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "#/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { useAgent, useAgentRuns, useStartRun } from "#/lib/api/queries";
-import type { Run } from "#/lib/api/schemas";
+import type { AgentConfigurations, HttpContract, Run } from "#/lib/api/schemas";
 import { formatDateTime, formatDuration } from "#/lib/format";
+import { minutesToTime } from "#/lib/http-contract";
 import { textLinkClass } from "#/lib/styles";
-import { toolKey } from "#/lib/tools";
+
+const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTH_LABELS = [
+	"January",
+	"February",
+	"March",
+	"April",
+	"May",
+	"June",
+	"July",
+	"August",
+	"September",
+	"October",
+	"November",
+	"December",
+];
 
 export function AgentDetail({
 	agentId,
@@ -38,6 +54,7 @@ export function AgentDetail({
 	}
 
 	const data = agent.data;
+	const calls = Object.entries(data.configurations.primitives);
 
 	return (
 		<>
@@ -99,32 +116,30 @@ export function AgentDetail({
 					</Card>
 					<Card className="island-shell">
 						<CardHeader>
-							<CardTitle>Tools</CardTitle>
+							<CardTitle>HTTP calls</CardTitle>
 						</CardHeader>
 						<CardContent>
-							{data.configurations.tools.length === 0 ? (
+							{calls.length === 0 ? (
 								<p className="text-sm text-muted-foreground">
-									This agent has no tools.
+									This agent has no HTTP calls.
 								</p>
 							) : (
 								<ul className="space-y-4">
-									{data.configurations.tools.map((tool) => (
-										<li key={toolKey(tool)} className="space-y-2">
-											<Badge variant="outline">{tool.kind}</Badge>
-											<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-												{Object.entries(tool.config).map(([key, value]) => (
-													<div key={key} className="contents">
-														<dt className="text-muted-foreground">{key}</dt>
-														<dd>
-															<code>{value}</code>
-														</dd>
-													</div>
-												))}
-											</dl>
+									{calls.map(([name, contract]) => (
+										<li key={name}>
+											<CallSummary name={name} contract={contract} />
 										</li>
 									))}
 								</ul>
 							)}
+						</CardContent>
+					</Card>
+					<Card className="island-shell">
+						<CardHeader>
+							<CardTitle>Schedule</CardTitle>
+						</CardHeader>
+						<CardContent>
+							<ScheduleSummary configurations={data.configurations} />
 						</CardContent>
 					</Card>
 				</TabsContent>
@@ -133,6 +148,90 @@ export function AgentDetail({
 				</TabsContent>
 			</Tabs>
 		</>
+	);
+}
+
+function CallSummary({
+	name,
+	contract,
+}: {
+	name: string;
+	contract: HttpContract;
+}) {
+	const details: string[] = [];
+	if (contract.options?.retries != null) {
+		details.push(`${contract.options.retries} retries`);
+	}
+	if (contract.options?.timeout != null) {
+		details.push(`${contract.options.timeout} ms timeout`);
+	}
+	return (
+		<fieldset className="space-y-2 rounded-lg border border-(--line) p-3">
+			<legend className="px-1 font-mono text-sm font-medium">{name}</legend>
+			<div className="flex flex-wrap items-center gap-2 text-sm">
+				<ToneBadge tone={contract.method === "POST" ? "info" : "neutral"}>
+					{contract.method}
+				</ToneBadge>
+				<code className="break-all">{contract.URL}</code>
+			</div>
+			{contract.payload !== undefined ? (
+				<pre className="overflow-x-auto rounded-md bg-(--sand) p-2 text-xs">
+					{JSON.stringify(contract.payload, null, 2)}
+				</pre>
+			) : null}
+			<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+				<dt className="text-muted-foreground">API key</dt>
+				<dd>
+					<p>{contract.xApiKey ? "API key: configured" : "API key: none"}</p>
+				</dd>
+				<dt className="text-muted-foreground">Authorization</dt>
+				<dd>
+					<p>
+						{contract.authorizationHeader
+							? "Authorization header: configured"
+							: "Authorization header: none"}
+					</p>
+				</dd>
+			</dl>
+			{details.length > 0 ? (
+				<p className="text-sm text-muted-foreground">{details.join(" · ")}</p>
+			) : null}
+		</fieldset>
+	);
+}
+
+function ScheduleSummary({
+	configurations,
+}: {
+	configurations: AgentConfigurations;
+}) {
+	const { dayOfWeek, timeOfDay, month } = configurations;
+	if (dayOfWeek.length === 0 && timeOfDay.length === 0 && month == null) {
+		return (
+			<p className="text-sm text-muted-foreground">
+				Not scheduled. Runs only on demand.
+			</p>
+		);
+	}
+	return (
+		<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+			<dt className="text-muted-foreground">Days</dt>
+			<dd>
+				{dayOfWeek.length > 0
+					? dayOfWeek.map((day) => DAY_LABELS[day]).join(", ")
+					: "Any day"}
+			</dd>
+			<dt className="text-muted-foreground">Times</dt>
+			<dd>
+				{timeOfDay.length > 0
+					? timeOfDay.map(minutesToTime).join(", ")
+					: "Any time"}
+			</dd>
+			<dt className="text-muted-foreground">Month</dt>
+			<dd>
+				{month != null ? (MONTH_LABELS[month - 1] ?? month) : "Any month"}
+			</dd>
+		</dl>
 	);
 }
 

@@ -1,5 +1,5 @@
 import { HttpResponse, http } from "msw";
-import type { ZodError } from "zod";
+import type { z } from "zod";
 import { API_BASE_URL, DEV_USER_HEADER } from "#/lib/api/client";
 import {
 	type Agent,
@@ -7,18 +7,11 @@ import {
 	type Pagination,
 	type Run,
 } from "#/lib/api/schemas";
-import {
-	advanceRun,
-	createAgent,
-	createRun,
-	mockState,
-	now,
-	toolDefinitions,
-} from "./state";
+import { advanceRun, createAgent, createRun, mockState, now } from "./state";
 
 // Mirrors the backend (envelope, /api/v1, X-Dev-User-SSO, pagination, error
-// codes) for the endpoints it implements, and extends it with the endpoints
-// proposed in spec/2026-10-10-frontend-dashboard/plan.md.
+// codes, credential masking) for the endpoints it implements, and extends it
+// with the endpoints proposed in spec/2026-10-10-frontend-dashboard/plan.md.
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
@@ -73,12 +66,23 @@ const forbidden = () =>
 	fail(403, "forbidden", "You may not access agents for another user");
 const notFound = () => fail(404, "not_found", "Not found.");
 
-function validationError(error: ZodError) {
+// FastAPI's request validation shape: pydantic issues with loc and msg.
+function requestValidationError(issues: z.core.$ZodIssue[]) {
 	return fail(422, "validation_error", "Request validation failed", {
-		errors: error.issues.map((issue) => ({
+		errors: issues.map((issue) => ({
 			loc: ["body", ...issue.path.map(String)],
 			msg: issue.message,
 			type: issue.code,
+		})),
+	});
+}
+
+// The agent service's shape: field path and message, never the value.
+function configurationError(issues: z.core.$ZodIssue[]) {
+	return fail(422, "invalid_configuration", "Agent configuration is invalid", {
+		errors: issues.map((issue) => ({
+			field: issue.path.map(String).join("."),
+			message: issue.message,
 		})),
 	});
 }
@@ -124,11 +128,6 @@ const newestFirst = <T extends { created_at: string }>(items: T[]) =>
 	items.slice().sort((a, b) => b.created_at.localeCompare(a.created_at));
 
 export const handlers = [
-	http.get(url("/tools"), ({ request }) => {
-		if (!caller(request)) return unauthorized();
-		return ok(toolDefinitions);
-	}),
-
 	// Implemented in the backend.
 	http.get(url("/agents/:sso"), ({ request, params }) => {
 		const owner = caller(request);
@@ -141,16 +140,25 @@ export const handlers = [
 		return ok(page.data, { pagination: page.pagination });
 	}),
 
-	// Proposed.
+	// Implemented in the backend (feat/agent_create_http).
 	http.post(url("/agents/:sso"), async ({ request, params }) => {
 		const owner = caller(request);
 		if (!owner) return unauthorized();
 		if (owner !== String(params.sso)) return forbidden();
 		const parsed = agentInputSchema.safeParse(await request.json());
-		if (!parsed.success) return validationError(parsed.error);
+		if (!parsed.success) {
+			const issues = parsed.error.issues;
+			const bodyIssues = issues.filter(
+				(issue) => issue.path[0] !== "configurations",
+			);
+			return bodyIssues.length > 0
+				? requestValidationError(bodyIssues)
+				: configurationError(issues);
+		}
 		return ok(createAgent(owner, parsed.data), { status: 201 });
 	}),
 
+	// Proposed.
 	http.get(url("/agents/:sso/:id"), ({ request, params }) => {
 		const owner = caller(request);
 		if (!owner) return unauthorized();

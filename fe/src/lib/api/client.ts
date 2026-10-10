@@ -82,8 +82,10 @@ function parseJson(text: string): unknown {
 	}
 }
 
-// Pydantic validation issues ({ loc: ["body", "title"], msg }) become
-// { title: msg }; the location prefix (body, query, path) is dropped.
+// Two error detail shapes come back from the backend. Request validation
+// (pydantic) issues look like { loc: ["body", "title"], msg }; the location
+// prefix (body, query, path) is dropped. Configuration errors from the agent
+// service look like { field: "configurations.primitives.m.URL", message }.
 function fieldsFromDetails(
 	details: Record<string, unknown> | null | undefined,
 ): Record<string, string> | undefined {
@@ -92,7 +94,16 @@ function fieldsFromDetails(
 	const fields: Record<string, string> = {};
 	for (const issue of errors) {
 		if (!issue || typeof issue !== "object") continue;
-		const { loc, msg } = issue as { loc?: unknown; msg?: unknown };
+		const { loc, msg, field, message } = issue as {
+			loc?: unknown;
+			msg?: unknown;
+			field?: unknown;
+			message?: unknown;
+		};
+		if (typeof field === "string" && typeof message === "string") {
+			if (!(field in fields)) fields[field] = message;
+			continue;
+		}
 		if (!Array.isArray(loc) || typeof msg !== "string") continue;
 		const key = loc
 			.filter((part) => part !== "body" && part !== "query" && part !== "path")

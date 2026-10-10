@@ -98,6 +98,29 @@ describe("api.get", () => {
 		});
 	});
 
+	it("maps the backend's configuration errors ({ field, message }) to field messages", async () => {
+		server.use(
+			http.get(ping, () =>
+				fail(422, "invalid_configuration", "Agent configuration is invalid", {
+					errors: [
+						{
+							field: "configurations.primitives.list_issues.URL",
+							message: "Internal hostnames are not allowed",
+						},
+					],
+				}),
+			),
+		);
+		const error = await api.get("/ping", pingSchema).catch((e: unknown) => e);
+		expect(error).toMatchObject({
+			code: "invalid_configuration",
+			fields: {
+				"configurations.primitives.list_issues.URL":
+					"Internal hostnames are not allowed",
+			},
+		});
+	});
+
 	it("falls back to a generic code when the error body is not an envelope", async () => {
 		server.use(
 			http.get(ping, () => new HttpResponse("Bad gateway", { status: 502 })),

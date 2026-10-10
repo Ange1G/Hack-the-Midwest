@@ -7,6 +7,7 @@ import {
 	mockState,
 	runToCompletion,
 } from "#/mocks/state";
+import { safeAgentInput } from "#/test/fixtures";
 import { renderWithProviders } from "#/test/render";
 import { signInAs } from "#/test/session";
 import { AgentDetail } from "./agent-detail";
@@ -14,18 +15,23 @@ import { AgentDetail } from "./agent-detail";
 function seedAgent() {
 	const owner = signInAs();
 	return createAgent(owner.user_sso, {
-		title: "Uptime checker",
-		system_prompt: "Check the status page every hour.",
+		...safeAgentInput,
 		configurations: {
-			tools: [
-				{ kind: "http.get", config: { url: "https://status.example.com" } },
-			],
+			primitives: {
+				status: {
+					...safeAgentInput.configurations.primitives.status,
+					authorizationHeader: "Bearer tok-456",
+					options: { retries: 2, timeout: 5000 },
+				},
+			},
+			dayOfWeek: [1, 3, 5],
+			timeOfDay: [540, 1020],
 		},
 	});
 }
 
 describe("AgentDetail", () => {
-	it("shows the agent's name, instructions, and tools", async () => {
+	it("shows the agent's name, instructions, HTTP calls, and schedule", async () => {
 		const agent = seedAgent();
 		renderWithProviders(
 			<AgentDetail agentId={agent.id} onRunStarted={vi.fn()} />,
@@ -35,10 +41,23 @@ describe("AgentDetail", () => {
 			await screen.findByRole("heading", { name: "Uptime checker" }),
 		).toBeInTheDocument();
 		expect(
-			screen.getByText("Check the status page every hour."),
+			screen.getByText("Check the status page and summarise it."),
 		).toBeInTheDocument();
-		expect(screen.getByText("http.get")).toBeInTheDocument();
-		expect(screen.getByText("https://status.example.com")).toBeInTheDocument();
+
+		const call = screen.getByRole("group", { name: "status" });
+		expect(within(call).getByText("GET")).toBeInTheDocument();
+		expect(
+			within(call).getByText("https://status.example.com/api/v2/status.json"),
+		).toBeInTheDocument();
+		expect(within(call).getByText(/authorization header/i)).toHaveTextContent(
+			/configured/i,
+		);
+		expect(within(call).queryByText(/tok-456/)).not.toBeInTheDocument();
+		expect(within(call).getByText(/2 retries/i)).toBeInTheDocument();
+		expect(within(call).getByText(/5000 ms/i)).toBeInTheDocument();
+
+		expect(screen.getByText(/mon, wed, fri/i)).toBeInTheDocument();
+		expect(screen.getByText(/09:00, 17:00/i)).toBeInTheDocument();
 	});
 
 	it("starts a run and reports it", async () => {

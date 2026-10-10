@@ -16,7 +16,6 @@ import {
 	runSchema,
 	type SignInInput,
 	signInInputSchema,
-	toolDefinitionSchema,
 } from "./schemas";
 import {
 	clearSessionUser,
@@ -35,7 +34,6 @@ const LIST_PAGE_SIZE = 100;
 
 export const queryKeys = {
 	me: ["me"] as const,
-	tools: ["tools"] as const,
 	agents: ["agents"] as const,
 	agent: (id: string) => ["agents", id] as const,
 	agentRuns: (id: string) => ["agents", id, "runs"] as const,
@@ -107,23 +105,6 @@ export function useSignOut() {
 			});
 		},
 	});
-}
-
-// Tools
-
-export function toolsQueryOptions() {
-	return queryOptions({
-		queryKey: queryKeys.tools,
-		queryFn: () => {
-			requireUser();
-			return api.list("/tools", toolDefinitionSchema).then((r) => r.items);
-		},
-		staleTime: Number.POSITIVE_INFINITY,
-	});
-}
-
-export function useToolDefinitions() {
-	return useQuery(toolsQueryOptions());
 }
 
 // Agents

@@ -9,7 +9,6 @@ import { useAgents } from "#/lib/api/queries";
 import type { Agent } from "#/lib/api/schemas";
 import { formatDateTime } from "#/lib/format";
 import { buttonLinkClass, textLinkClass } from "#/lib/styles";
-import { toolKey } from "#/lib/tools";
 
 const columns: DataTableColumn<Agent>[] = [
 	{
@@ -32,16 +31,18 @@ const columns: DataTableColumn<Agent>[] = [
 		),
 	},
 	{
-		id: "tools",
-		header: "Tools",
+		id: "calls",
+		header: "HTTP calls",
 		enableSorting: false,
 		cell: ({ row }) => (
 			<div className="flex flex-wrap gap-1">
-				{row.original.configurations.tools.map((tool) => (
-					<Badge key={toolKey(tool)} variant="outline">
-						{tool.kind}
-					</Badge>
-				))}
+				{Object.entries(row.original.configurations.primitives).map(
+					([name, contract]) => (
+						<Badge key={name} variant="outline" className="font-mono">
+							{contract.method} {name}
+						</Badge>
+					),
+				)}
 			</div>
 		),
 	},
@@ -91,7 +92,7 @@ export function AgentList() {
 		return (
 			<EmptyState
 				title="No agents yet"
-				description="Build an agent from the platform's tools and run it in an isolated container."
+				description="Describe what an agent should do, give it the HTTP calls it may make, and run it in an isolated container."
 				action={
 					<Button asChild>
 						<Link to="/agents/new" className={buttonLinkClass}>

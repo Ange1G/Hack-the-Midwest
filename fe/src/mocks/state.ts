@@ -1,12 +1,18 @@
 import type {
 	Agent,
+	AgentConfigurations,
 	AgentInput,
 	Finding,
+	HttpContract,
+	HttpOptions,
 	Run,
 	RunEvent,
-	ToolConfig,
-	ToolDefinition,
 } from "#/lib/api/schemas";
+import {
+	CONTRACT_VERSION,
+	SECRET_PLACEHOLDER,
+	untrustedDestinationReason,
+} from "#/lib/http-contract";
 
 // In-memory state behind the mock API. Development and test only. Identity is
 // whatever the X-Dev-User-SSO header says, exactly like the backend's
@@ -47,66 +53,58 @@ export function now(): string {
 	return new Date().toISOString();
 }
 
-export const toolDefinitions: ToolDefinition[] = [
-	{
-		kind: "http.get",
-		name: "HTTP GET",
-		description: "Fetch a URL and hand the response body to the agent.",
-		config_fields: [{ key: "url", label: "URL", type: "url", required: true }],
-		credential_fields: [{ key: "bearer_token", label: "Bearer token" }],
-	},
-	{
-		kind: "http.post",
-		name: "HTTP POST",
-		description: "Send a JSON body to a URL, for example a webhook.",
-		config_fields: [
-			{ key: "url", label: "URL", type: "url", required: true },
-			{
-				key: "body_template",
-				label: "Body template (JSON)",
-				type: "textarea",
-				required: false,
-			},
-		],
-		credential_fields: [{ key: "bearer_token", label: "Bearer token" }],
-	},
-	{
-		kind: "db.query",
-		name: "Database query",
-		description: "Run a read-only SQL query against your own database.",
-		config_fields: [
-			{ key: "query", label: "SQL query", type: "textarea", required: true },
-		],
-		credential_fields: [
-			{ key: "connection_string", label: "Connection string" },
-		],
-	},
-	{
-		kind: "mcp",
-		name: "MCP connector",
-		description:
-			"Expose the tools of an MCP server you run or subscribe to, such as DevRev.",
-		config_fields: [
-			{ key: "url", label: "MCP server URL", type: "url", required: true },
-		],
-		credential_fields: [{ key: "token", label: "Access token" }],
-	},
-];
+const uniqueSorted = (values: number[]) =>
+	Array.from(new Set(values)).sort((a, b) => a - b);
+
+function compactOptions(options: HttpOptions | undefined): HttpOptions | null {
+	if (!options) return null;
+	const compact: HttpOptions = {};
+	if (options.retries != null) compact.retries = options.retries;
+	if (options.timeout != null) compact.timeout = options.timeout;
+	return Object.keys(compact).length > 0 ? compact : null;
+}
+
+// Stores a contract the way the backend does: credentials replaced by the
+// placeholder (the real server encrypts them into a separate table) and unset
+// fields omitted.
+function storedContract(
+	contract: AgentInput["configurations"]["primitives"][string],
+): HttpContract {
+	const options = compactOptions(contract.options);
+	return {
+		contractVersion: CONTRACT_VERSION,
+		method: contract.method,
+		URL: contract.URL,
+		...(contract.payload !== undefined ? { payload: contract.payload } : {}),
+		...(contract.xApiKey ? { xApiKey: SECRET_PLACEHOLDER } : {}),
+		...(contract.authorizationHeader
+			? { authorizationHeader: SECRET_PLACEHOLDER }
+			: {}),
+		...(options ? { options } : {}),
+	};
+}
 
 export function createAgent(owner_user_sso: string, input: AgentInput): Agent {
+	const primitives: Record<string, HttpContract> = {};
+	for (const [name, contract] of Object.entries(
+		input.configurations.primitives,
+	)) {
+		primitives[name] = storedContract(contract);
+	}
+	const configurations: AgentConfigurations = {
+		primitives,
+		...(input.configurations.month != null
+			? { month: input.configurations.month }
+			: {}),
+		dayOfWeek: uniqueSorted(input.configurations.dayOfWeek),
+		timeOfDay: uniqueSorted(input.configurations.timeOfDay),
+	};
 	const timestamp = now();
 	const agent: Agent = {
 		id: nextId("agt"),
-		title: input.title,
-		system_prompt: input.system_prompt,
-		// Credentials are write-only: accepted on input, never stored on the
-		// record the API returns.
-		configurations: {
-			tools: input.configurations.tools.map(({ kind, config }) => ({
-				kind,
-				config,
-			})),
-		},
+		title: input.agentTitle,
+		system_prompt: input.systemPrompt,
+		configurations,
 		schedule_month: null,
 		schedule_day: null,
 		schedule_time: null,
@@ -171,53 +169,6 @@ export function runToCompletion(run: Run): void {
 	}
 }
 
-export type Violation = { rule: string; message: string };
-
-const metadataHosts = new Set(["169.254.169.254", "metadata.google.internal"]);
-const loopbackHosts = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]"]);
-const privateRanges = [/^10\./, /^192\.168\./, /^172\.(1[6-9]|2\d|3[01])\./];
-
-// Deterministic security rule, mirroring the constitution's requirement that
-// critical controls do not depend on an LLM's judgement.
-export function findViolation(tool: ToolConfig): Violation | null {
-	if (tool.kind !== "http.get" && tool.kind !== "http.post") return null;
-	const raw = tool.config.url;
-	if (!raw) return null;
-	let host: string;
-	try {
-		host = new URL(raw).hostname;
-	} catch {
-		return null;
-	}
-	if (metadataHosts.has(host)) {
-		return {
-			rule: "ssrf.metadata_endpoint",
-			message: `HTTP tool targeted the cloud metadata endpoint (${host}). Request blocked and run terminated.`,
-		};
-	}
-	if (
-		loopbackHosts.has(host) ||
-		privateRanges.some((range) => range.test(host))
-	) {
-		return {
-			rule: "ssrf.private_network",
-			message: `HTTP tool targeted a private network address (${host}). Request blocked and run terminated.`,
-		};
-	}
-	return null;
-}
-
-function describeTool(tool: ToolConfig): string {
-	switch (tool.kind) {
-		case "http.get":
-		case "http.post":
-		case "mcp":
-			return tool.config.url ?? "(no url configured)";
-		case "db.query":
-			return tool.config.query ?? "(no query configured)";
-	}
-}
-
 function finish(run: Run, agent: Agent, output: string): void {
 	run.status = "succeeded";
 	run.output = output;
@@ -226,22 +177,19 @@ function finish(run: Run, agent: Agent, output: string): void {
 	syncLastRun(agent, run);
 }
 
-function kill(run: Run, agent: Agent, violation: Violation): void {
+function kill(run: Run, agent: Agent, rule: string, message: string): void {
 	const finding: Finding = {
 		id: nextId("fnd"),
 		run_id: run.id,
 		agent_id: agent.id,
 		severity: "critical",
-		rule: violation.rule,
-		message: violation.message,
+		rule,
+		message,
 		action: "killed",
 		created_at: now(),
 	};
 	mockState.findings.push(finding);
-	pushEvent(run, "security", violation.message, {
-		rule: violation.rule,
-		finding_id: finding.id,
-	});
+	pushEvent(run, "security", message, { rule, finding_id: finding.id });
 	run.status = "killed";
 	run.error = "Terminated by the security monitor";
 	run.finding_id = finding.id;
@@ -252,6 +200,9 @@ function kill(run: Run, agent: Agent, violation: Violation): void {
 
 // Advances a run one step each time it is read, so a polling client sees
 // queued, running, and then a terminal state without any wall-clock timers.
+// The monitor rule is deterministic, mirroring the constitution's requirement
+// that critical controls do not depend on an LLM's judgement: unsafe URLs are
+// already refused at save time, so the run-time check watches where data goes.
 export function advanceRun(run: Run): void {
 	if (run.status !== "queued" && run.status !== "running") return;
 	const agent = mockState.agents.find((item) => item.id === run.agent_id);
@@ -264,37 +215,42 @@ export function advanceRun(run: Run): void {
 		run.status = "running";
 		run.started_at = now();
 		pushEvent(run, "log", `Agent "${agent.title}" started`);
-		pushEvent(run, "log", "Reading instructions and selecting tools");
+		pushEvent(run, "log", "Reading instructions and selecting HTTP calls");
 		syncLastRun(agent, run);
 		return;
 	}
 
+	const calls = Object.entries(agent.configurations.primitives);
 	if (tick === 2) {
-		const tool = agent.configurations.tools[0];
-		if (!tool) {
-			finish(run, agent, "No tools configured, so there was nothing to do.");
+		const first = calls[0];
+		if (!first) {
+			finish(
+				run,
+				agent,
+				"No HTTP calls configured, so there was nothing to do.",
+			);
 			return;
 		}
-		pushEvent(run, "tool_call", `${tool.kind} ${describeTool(tool)}`, {
-			tool: tool.kind,
-			config: tool.config,
+		const [name, contract] = first;
+		pushEvent(run, "tool_call", `${contract.method} ${contract.URL}`, {
+			primitive: name,
+			method: contract.method,
 		});
-		const violation = findViolation(tool);
-		if (violation) {
-			kill(run, agent, violation);
+		const reason = untrustedDestinationReason(contract.URL);
+		if (reason) {
+			kill(run, agent, "exfiltration.untrusted_destination", reason);
 			return;
 		}
-		pushEvent(run, "tool_result", `${tool.kind} returned 200 OK`, {
+		pushEvent(run, "tool_result", `${name} returned 200 OK`, {
 			status: 200,
 			bytes: 1284,
 		});
 		return;
 	}
 
-	const count = agent.configurations.tools.length;
 	finish(
 		run,
 		agent,
-		`Completed ${count} tool call${count === 1 ? "" : "s"}. Summary: all checks passed, nothing needs attention.`,
+		`Completed ${calls.length} HTTP call${calls.length === 1 ? "" : "s"}. Summary: all checks passed, nothing needs attention.`,
 	);
 }

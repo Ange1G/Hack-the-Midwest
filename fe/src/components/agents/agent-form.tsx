@@ -1,86 +1,215 @@
 import { useForm } from "@tanstack/react-form";
 import { useState } from "react";
 import { FieldErrors, fieldErrorMessages } from "#/components/form-field";
-import { ErrorState, LoadingState } from "#/components/states";
 import { Button } from "#/components/ui/button";
-import { Card, CardContent, CardHeader } from "#/components/ui/card";
 import { Checkbox } from "#/components/ui/checkbox";
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { Textarea } from "#/components/ui/textarea";
-import { useCreateAgent, useToolDefinitions } from "#/lib/api/queries";
+import { ApiError } from "#/lib/api/client";
+import { useCreateAgent } from "#/lib/api/queries";
 import {
 	type Agent,
+	type AgentInput,
 	agentInputSchema,
-	type ToolConfig,
-	type ToolCredentials,
-	type ToolDefinition,
+	type HttpContractInput,
+	type HttpMethod,
 } from "#/lib/api/schemas";
+import {
+	CONTRACT_VERSION,
+	MAX_RETRIES,
+	MAX_TIMEOUT_MS,
+	MIN_TIMEOUT_MS,
+	timeToMinutes,
+} from "#/lib/http-contract";
+import { cn } from "#/lib/utils";
 
-type ToolDraft = {
-	enabled: boolean;
-	config: Record<string, string>;
-	credentials: Record<string, string>;
+type CallDraft = {
+	key: number;
+	name: string;
+	method: HttpMethod;
+	url: string;
+	payload: string;
+	xApiKey: string;
+	authorizationHeader: string;
+	retries: string;
+	timeout: string;
 };
 
-type Drafts = Record<string, ToolDraft>;
+const DAYS = [
+	{ value: 1, label: "Mon" },
+	{ value: 2, label: "Tue" },
+	{ value: 3, label: "Wed" },
+	{ value: 4, label: "Thu" },
+	{ value: 5, label: "Fri" },
+	{ value: 6, label: "Sat" },
+	{ value: 0, label: "Sun" },
+];
 
-const emptyDraft = (): ToolDraft => ({
-	enabled: false,
-	config: {},
-	credentials: {},
+const MONTHS = [
+	"January",
+	"February",
+	"March",
+	"April",
+	"May",
+	"June",
+	"July",
+	"August",
+	"September",
+	"October",
+	"November",
+	"December",
+];
+
+const selectClass =
+	"h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-xs focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none";
+
+let nextKey = 1;
+const emptyCall = (): CallDraft => ({
+	key: nextKey++,
+	name: "",
+	method: "GET",
+	url: "",
+	payload: "",
+	xApiKey: "",
+	authorizationHeader: "",
+	retries: "",
+	timeout: "",
 });
 
-function emptyDrafts(definitions: ToolDefinition[]): Drafts {
-	return Object.fromEntries(
-		definitions.map((definition) => [definition.kind, emptyDraft()]),
-	);
+type Errors = Record<string, string>;
+
+function parseWholeNumber(value: string): number | null | undefined {
+	const trimmed = value.trim();
+	if (!trimmed) return undefined;
+	return /^-?\d+$/.test(trimmed) ? Number(trimmed) : null;
 }
 
-function trimValues(values: Record<string, string>): Record<string, string> {
-	return Object.fromEntries(
-		Object.entries(values)
-			.map(([key, value]) => [key, value.trim()])
-			.filter(([, value]) => value.length > 0),
-	);
-}
+// Turns the drafts into the team-spec body, collecting problems zod cannot
+// see from the raw strings (duplicate names, non-JSON payloads, non-numbers).
+function buildInput(
+	basics: { name: string; instructions: string },
+	calls: CallDraft[],
+	schedule: { days: number[]; times: string; month: string },
+): { input: AgentInput; errors: Errors } {
+	const errors: Errors = {};
+	const primitives: Record<string, HttpContractInput> = {};
+	const seen = new Set<string>();
 
-export function validateTools(
-	definitions: ToolDefinition[],
-	drafts: Drafts,
-): Record<string, string> {
-	const errors: Record<string, string> = {};
-	for (const definition of definitions) {
-		const draft = drafts[definition.kind];
-		if (!draft?.enabled) continue;
-		for (const field of definition.config_fields) {
-			if (field.required && !(draft.config[field.key] ?? "").trim()) {
-				errors[`${definition.kind}.${field.key}`] =
-					`${field.label} is required`;
+	calls.forEach((call, index) => {
+		const name = call.name.trim();
+		if (!name) errors[`calls.${index}.name`] = "Call name is required";
+		else if (seen.has(name))
+			errors[`calls.${index}.name`] = "Call names must be unique";
+		seen.add(name);
+
+		const contract: HttpContractInput = {
+			contractVersion: CONTRACT_VERSION,
+			method: call.method,
+			URL: call.url.trim(),
+		};
+		if (call.method === "POST" && call.payload.trim()) {
+			try {
+				contract.payload = JSON.parse(call.payload);
+			} catch {
+				errors[`calls.${index}.payload`] = "Payload must be valid JSON";
 			}
 		}
+		if (call.xApiKey) contract.xApiKey = call.xApiKey;
+		if (call.authorizationHeader) {
+			contract.authorizationHeader = call.authorizationHeader;
+		}
+		const retries = parseWholeNumber(call.retries);
+		const timeout = parseWholeNumber(call.timeout);
+		if (retries === null)
+			errors[`calls.${index}.retries`] = "Retries must be a whole number";
+		if (timeout === null)
+			errors[`calls.${index}.timeout`] =
+				"Timeout must be a whole number of milliseconds";
+		if (retries != null || timeout != null) {
+			contract.options = {
+				...(retries != null ? { retries } : {}),
+				...(timeout != null ? { timeout } : {}),
+			};
+		}
+		primitives[name || `call_${index + 1}`] = contract;
+	});
+
+	const timeOfDay: number[] = [];
+	for (const part of schedule.times.split(",")) {
+		if (!part.trim()) continue;
+		const minutes = timeToMinutes(part);
+		if (minutes === null) {
+			errors["schedule.times"] = "Times must look like 09:00 or 17:30";
+		} else {
+			timeOfDay.push(minutes);
+		}
+	}
+
+	const input: AgentInput = {
+		agentTitle: basics.name.trim(),
+		systemPrompt: basics.instructions.trim(),
+		configurations: {
+			primitives,
+			...(schedule.month ? { month: Number(schedule.month) } : {}),
+			dayOfWeek: [...schedule.days].sort((a, b) => a - b),
+			timeOfDay: Array.from(new Set(timeOfDay)).sort((a, b) => a - b),
+		},
+	};
+
+	// Map schema issues back onto the draft that produced them.
+	const parsed = agentInputSchema.safeParse(input);
+	if (!parsed.success) {
+		const names = Object.keys(primitives);
+		for (const issue of parsed.error.issues) {
+			const key = errorKeyForPath(issue.path.map(String), names);
+			if (key && !(key in errors)) errors[key] = issue.message;
+		}
+	}
+	return { input, errors };
+}
+
+const contractFieldKeys: Record<string, string> = {
+	URL: "url",
+	payload: "payload",
+	xApiKey: "xApiKey",
+	authorizationHeader: "authorizationHeader",
+	"options.retries": "retries",
+	"options.timeout": "timeout",
+};
+
+function errorKeyForPath(path: string[], names: string[]): string | null {
+	if (path[0] === "agentTitle") return "form";
+	if (path[0] === "systemPrompt") return "form";
+	if (path[0] !== "configurations") return "form";
+	if (path[1] === "primitives") {
+		const index = names.indexOf(path[2] ?? "");
+		if (index < 0) return "form";
+		const rest = path.slice(3).join(".");
+		if (!rest) return `calls.${index}.name`;
+		const field = contractFieldKeys[rest];
+		return field ? `calls.${index}.${field}` : `calls.${index}.name`;
+	}
+	if (path[1] === "timeOfDay") return "schedule.times";
+	if (path[1] === "dayOfWeek") return "schedule.days";
+	if (path[1] === "month") return "schedule.month";
+	return "form";
+}
+
+function errorsFromServer(
+	fields: Record<string, string>,
+	names: string[],
+): Errors {
+	const errors: Errors = {};
+	for (const [field, message] of Object.entries(fields)) {
+		const key = errorKeyForPath(field.split("."), names) ?? "form";
+		if (!(key in errors)) errors[key] = message;
 	}
 	return errors;
 }
 
-// Credentials travel beside the configuration, never inside it, so the
-// backend can store them in a secret store instead of the agent's JSON.
-export function buildTools(
-	definitions: ToolDefinition[],
-	drafts: Drafts,
-): { tools: ToolConfig[]; credentials: ToolCredentials[] } {
-	const tools: ToolConfig[] = [];
-	const credentials: ToolCredentials[] = [];
-	for (const definition of definitions) {
-		const draft = drafts[definition.kind];
-		if (!draft?.enabled) continue;
-		tools.push({ kind: definition.kind, config: trimValues(draft.config) });
-		const values = trimValues(draft.credentials);
-		if (Object.keys(values).length > 0) {
-			credentials.push({ tool: definition.kind, values });
-		}
-	}
-	return { tools, credentials };
+function FieldError({ message }: { message: string | undefined }) {
+	return message ? <p className="text-sm text-destructive">{message}</p> : null;
 }
 
 export function AgentForm({
@@ -88,58 +217,43 @@ export function AgentForm({
 }: {
 	onCreated: (agent: Agent) => void;
 }) {
-	const tools = useToolDefinitions();
-
-	if (tools.isPending) {
-		return <LoadingState label="Loading tools…" />;
-	}
-	if (tools.isError) {
-		return (
-			<ErrorState
-				title="Could not load the platform tools"
-				error={tools.error}
-				onRetry={() => void tools.refetch()}
-			/>
-		);
-	}
-	return <AgentFormFields definitions={tools.data} onCreated={onCreated} />;
-}
-
-function AgentFormFields({
-	definitions,
-	onCreated,
-}: {
-	definitions: ToolDefinition[];
-	onCreated: (agent: Agent) => void;
-}) {
 	const createAgent = useCreateAgent();
-	const [drafts, setDrafts] = useState<Drafts>(() => emptyDrafts(definitions));
-	const [toolErrors, setToolErrors] = useState<Record<string, string>>({});
+	const [calls, setCalls] = useState<CallDraft[]>([]);
+	const [days, setDays] = useState<number[]>([]);
+	const [times, setTimes] = useState("");
+	const [month, setMonth] = useState("");
+	const [errors, setErrors] = useState<Errors>({});
+
+	const updateCall = (key: number, patch: Partial<CallDraft>) =>
+		setCalls((previous) =>
+			previous.map((call) => (call.key === key ? { ...call, ...patch } : call)),
+		);
 
 	const form = useForm({
 		defaultValues: { name: "", instructions: "" },
 		onSubmit: ({ value }) => {
-			const errors = validateTools(definitions, drafts);
-			setToolErrors(errors);
-			if (Object.keys(errors).length > 0) return;
-			const { tools, credentials } = buildTools(definitions, drafts);
-			createAgent.mutate(
-				{
-					title: value.name.trim(),
-					system_prompt: value.instructions.trim(),
-					configurations: { tools },
-					...(credentials.length > 0 ? { credentials } : {}),
+			const { input, errors: problems } = buildInput(value, calls, {
+				days,
+				times,
+				month,
+			});
+			setErrors(problems);
+			if (Object.keys(problems).length > 0) return;
+			createAgent.mutate(input, {
+				onSuccess: (agent) => onCreated(agent),
+				onError: (error) => {
+					if (error instanceof ApiError && error.fields) {
+						setErrors(
+							errorsFromServer(
+								error.fields,
+								Object.keys(input.configurations.primitives),
+							),
+						);
+					}
 				},
-				{ onSuccess: (agent) => onCreated(agent) },
-			);
+			});
 		},
 	});
-
-	const updateDraft = (kind: string, patch: (draft: ToolDraft) => ToolDraft) =>
-		setDrafts((previous) => ({
-			...previous,
-			[kind]: patch(previous[kind] ?? emptyDraft()),
-		}));
 
 	return (
 		<form
@@ -154,7 +268,7 @@ function AgentFormFields({
 			<div className="space-y-4">
 				<form.Field
 					name="name"
-					validators={{ onSubmit: agentInputSchema.shape.title }}
+					validators={{ onSubmit: agentInputSchema.shape.agentTitle }}
 				>
 					{(field) => (
 						<div className="space-y-1.5">
@@ -162,7 +276,7 @@ function AgentFormFields({
 							<Input
 								id="agent-name"
 								name={field.name}
-								placeholder="Uptime checker"
+								placeholder="Weekday GitHub digest"
 								value={field.state.value}
 								onBlur={field.handleBlur}
 								onChange={(event) => field.handleChange(event.target.value)}
@@ -176,7 +290,7 @@ function AgentFormFields({
 
 				<form.Field
 					name="instructions"
-					validators={{ onSubmit: agentInputSchema.shape.system_prompt }}
+					validators={{ onSubmit: agentInputSchema.shape.systemPrompt }}
 				>
 					{(field) => (
 						<div className="space-y-1.5">
@@ -198,105 +312,266 @@ function AgentFormFields({
 				</form.Field>
 			</div>
 
-			<fieldset className="space-y-3">
-				<legend className="mb-2 text-base font-semibold">Tools</legend>
-				<p className="text-sm text-muted-foreground">
-					Pick the platform primitives this agent may use. Credentials are
-					stored securely, injected at run time, and never shown again.
-				</p>
-				{definitions.map((definition) => {
-					const draft = drafts[definition.kind] ?? emptyDraft();
-					const id = `tool-${definition.kind}`;
-					return (
-						<Card key={definition.kind} className="island-shell">
-							<CardHeader className="flex flex-row items-start gap-3 space-y-0">
+			<section className="space-y-3" aria-labelledby="calls-heading">
+				<div>
+					<h2 id="calls-heading" className="text-base font-semibold">
+						HTTP calls
+					</h2>
+					<p className="text-sm text-muted-foreground">
+						Each call is a contract the agent may execute. Credentials are
+						encrypted at rest and never shown again. Private and internal
+						addresses are refused.
+					</p>
+				</div>
+				{calls.map((call, index) => (
+					<fieldset
+						key={call.key}
+						className="island-shell space-y-4 rounded-xl p-4"
+					>
+						<legend className="px-1 font-medium">HTTP call {index + 1}</legend>
+						<div className="flex justify-end">
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								onClick={() =>
+									setCalls((previous) =>
+										previous.filter((item) => item.key !== call.key),
+									)
+								}
+							>
+								Remove call {index + 1}
+							</Button>
+						</div>
+
+						<div className="grid gap-4 sm:grid-cols-[1fr_8rem]">
+							<div className="space-y-1.5">
+								<Label htmlFor={`call-${call.key}-name`}>Call name</Label>
+								<Input
+									id={`call-${call.key}-name`}
+									placeholder="list_issues"
+									autoCapitalize="off"
+									spellCheck={false}
+									value={call.name}
+									onChange={(event) =>
+										updateCall(call.key, { name: event.target.value })
+									}
+									aria-invalid={Boolean(errors[`calls.${index}.name`])}
+								/>
+								<FieldError message={errors[`calls.${index}.name`]} />
+							</div>
+							<div className="space-y-1.5">
+								<Label htmlFor={`call-${call.key}-method`}>Method</Label>
+								<select
+									id={`call-${call.key}-method`}
+									className={selectClass}
+									value={call.method}
+									onChange={(event) =>
+										updateCall(call.key, {
+											method: event.target.value as HttpMethod,
+										})
+									}
+								>
+									<option value="GET">GET</option>
+									<option value="POST">POST</option>
+								</select>
+							</div>
+						</div>
+
+						<div className="space-y-1.5">
+							<Label htmlFor={`call-${call.key}-url`}>URL</Label>
+							<Input
+								id={`call-${call.key}-url`}
+								type="url"
+								placeholder="https://api.github.com/repos/acme/web/issues"
+								value={call.url}
+								onChange={(event) =>
+									updateCall(call.key, { url: event.target.value })
+								}
+								aria-invalid={Boolean(errors[`calls.${index}.url`])}
+							/>
+							<FieldError message={errors[`calls.${index}.url`]} />
+						</div>
+
+						{call.method === "POST" ? (
+							<div className="space-y-1.5">
+								<Label htmlFor={`call-${call.key}-payload`}>
+									Payload (JSON)
+								</Label>
+								<Textarea
+									id={`call-${call.key}-payload`}
+									rows={3}
+									placeholder='{"text": "digest ready"}'
+									className="font-mono text-xs"
+									value={call.payload}
+									onChange={(event) =>
+										updateCall(call.key, { payload: event.target.value })
+									}
+									aria-invalid={Boolean(errors[`calls.${index}.payload`])}
+								/>
+								<FieldError message={errors[`calls.${index}.payload`]} />
+							</div>
+						) : null}
+
+						<div className="grid gap-4 sm:grid-cols-2">
+							<div className="space-y-1.5">
+								<Label htmlFor={`call-${call.key}-key`}>API key</Label>
+								<Input
+									id={`call-${call.key}-key`}
+									type="password"
+									autoComplete="off"
+									value={call.xApiKey}
+									onChange={(event) =>
+										updateCall(call.key, { xApiKey: event.target.value })
+									}
+									aria-invalid={Boolean(errors[`calls.${index}.xApiKey`])}
+								/>
+								<FieldError message={errors[`calls.${index}.xApiKey`]} />
+							</div>
+							<div className="space-y-1.5">
+								<Label htmlFor={`call-${call.key}-auth`}>
+									Authorization header
+								</Label>
+								<Input
+									id={`call-${call.key}-auth`}
+									type="password"
+									autoComplete="off"
+									placeholder="Bearer …"
+									value={call.authorizationHeader}
+									onChange={(event) =>
+										updateCall(call.key, {
+											authorizationHeader: event.target.value,
+										})
+									}
+									aria-invalid={Boolean(
+										errors[`calls.${index}.authorizationHeader`],
+									)}
+								/>
+								<FieldError
+									message={errors[`calls.${index}.authorizationHeader`]}
+								/>
+							</div>
+						</div>
+
+						<div className="grid gap-4 sm:grid-cols-2">
+							<div className="space-y-1.5">
+								<Label htmlFor={`call-${call.key}-retries`}>Retries</Label>
+								<Input
+									id={`call-${call.key}-retries`}
+									type="number"
+									inputMode="numeric"
+									min={0}
+									max={MAX_RETRIES}
+									placeholder={`0 to ${MAX_RETRIES}`}
+									value={call.retries}
+									onChange={(event) =>
+										updateCall(call.key, { retries: event.target.value })
+									}
+									aria-invalid={Boolean(errors[`calls.${index}.retries`])}
+								/>
+								<FieldError message={errors[`calls.${index}.retries`]} />
+							</div>
+							<div className="space-y-1.5">
+								<Label htmlFor={`call-${call.key}-timeout`}>Timeout (ms)</Label>
+								<Input
+									id={`call-${call.key}-timeout`}
+									type="number"
+									inputMode="numeric"
+									min={MIN_TIMEOUT_MS}
+									max={MAX_TIMEOUT_MS}
+									placeholder={`${MIN_TIMEOUT_MS} to ${MAX_TIMEOUT_MS}`}
+									value={call.timeout}
+									onChange={(event) =>
+										updateCall(call.key, { timeout: event.target.value })
+									}
+									aria-invalid={Boolean(errors[`calls.${index}.timeout`])}
+								/>
+								<FieldError message={errors[`calls.${index}.timeout`]} />
+							</div>
+						</div>
+					</fieldset>
+				))}
+				<Button
+					type="button"
+					variant="outline"
+					onClick={() => setCalls((previous) => [...previous, emptyCall()])}
+				>
+					Add HTTP call
+				</Button>
+			</section>
+
+			<section className="space-y-3" aria-labelledby="schedule-heading">
+				<div>
+					<h2 id="schedule-heading" className="text-base font-semibold">
+						Schedule
+					</h2>
+					<p className="text-sm text-muted-foreground">
+						Optional. Leave everything empty to run the agent only on demand.
+					</p>
+				</div>
+				<fieldset className="space-y-2">
+					<legend className="text-sm font-medium">Run on</legend>
+					<div className="flex flex-wrap gap-4">
+						{DAYS.map((day) => (
+							<div key={day.value} className="flex items-center gap-2">
 								<Checkbox
-									id={id}
-									checked={draft.enabled}
+									id={`day-${day.value}`}
+									checked={days.includes(day.value)}
 									onCheckedChange={(checked) =>
-										updateDraft(definition.kind, (current) => ({
-											...current,
-											enabled: checked === true,
-										}))
+										setDays((previous) =>
+											checked === true
+												? [...previous, day.value]
+												: previous.filter((value) => value !== day.value),
+										)
 									}
 								/>
-								<div className="space-y-1">
-									<Label htmlFor={id} className="text-base">
-										{definition.name}
-									</Label>
-									<p className="text-sm text-muted-foreground">
-										{definition.description}
-									</p>
-								</div>
-							</CardHeader>
-							{draft.enabled ? (
-								<CardContent className="space-y-4">
-									{definition.config_fields.map((field) => {
-										const fieldId = `${id}-${field.key}`;
-										const error = toolErrors[`${definition.kind}.${field.key}`];
-										const value = draft.config[field.key] ?? "";
-										const onChange = (next: string) =>
-											updateDraft(definition.kind, (current) => ({
-												...current,
-												config: { ...current.config, [field.key]: next },
-											}));
-										return (
-											<div key={field.key} className="space-y-1.5">
-												<Label htmlFor={fieldId}>{field.label}</Label>
-												{field.type === "textarea" ? (
-													<Textarea
-														id={fieldId}
-														rows={3}
-														value={value}
-														onChange={(event) => onChange(event.target.value)}
-														aria-invalid={Boolean(error)}
-													/>
-												) : (
-													<Input
-														id={fieldId}
-														type={field.type === "url" ? "url" : "text"}
-														value={value}
-														onChange={(event) => onChange(event.target.value)}
-														aria-invalid={Boolean(error)}
-													/>
-												)}
-												{error ? (
-													<p className="text-sm text-destructive">{error}</p>
-												) : null}
-											</div>
-										);
-									})}
-									{definition.credential_fields.map((field) => {
-										const fieldId = `${id}-credential-${field.key}`;
-										return (
-											<div key={field.key} className="space-y-1.5">
-												<Label htmlFor={fieldId}>{field.label}</Label>
-												<Input
-													id={fieldId}
-													type="password"
-													autoComplete="off"
-													value={draft.credentials[field.key] ?? ""}
-													onChange={(event) =>
-														updateDraft(definition.kind, (current) => ({
-															...current,
-															credentials: {
-																...current.credentials,
-																[field.key]: event.target.value,
-															},
-														}))
-													}
-												/>
-											</div>
-										);
-									})}
-								</CardContent>
-							) : null}
-						</Card>
-					);
-				})}
-			</fieldset>
+								<Label htmlFor={`day-${day.value}`}>{day.label}</Label>
+							</div>
+						))}
+					</div>
+					<FieldError message={errors["schedule.days"]} />
+				</fieldset>
+				<div className="grid gap-4 sm:grid-cols-2">
+					<div className="space-y-1.5">
+						<Label htmlFor="schedule-times">
+							Times (HH:MM, comma separated)
+						</Label>
+						<Input
+							id="schedule-times"
+							placeholder="09:00, 17:30"
+							value={times}
+							onChange={(event) => setTimes(event.target.value)}
+							aria-invalid={Boolean(errors["schedule.times"])}
+						/>
+						<FieldError message={errors["schedule.times"]} />
+					</div>
+					<div className="space-y-1.5">
+						<Label htmlFor="schedule-month">Month</Label>
+						<select
+							id="schedule-month"
+							className={cn(selectClass)}
+							value={month}
+							onChange={(event) => setMonth(event.target.value)}
+						>
+							<option value="">Any month</option>
+							{MONTHS.map((label, index) => (
+								<option key={label} value={index + 1}>
+									{label}
+								</option>
+							))}
+						</select>
+						<FieldError message={errors["schedule.month"]} />
+					</div>
+				</div>
+			</section>
 
-			{createAgent.error ? (
+			{errors.form ? (
+				<p role="alert" className="text-sm text-destructive">
+					{errors.form}
+				</p>
+			) : null}
+			{createAgent.error &&
+			!(createAgent.error instanceof ApiError && createAgent.error.fields) ? (
 				<p role="alert" className="text-sm text-destructive">
 					{createAgent.error.message}
 				</p>

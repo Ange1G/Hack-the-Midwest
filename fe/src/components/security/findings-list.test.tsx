@@ -1,6 +1,7 @@
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { createAgent, createRun, runToCompletion } from "#/mocks/state";
+import { rogueAgentInput } from "#/test/fixtures";
 import { renderWithProviders } from "#/test/render";
 import { signInAs } from "#/test/session";
 import { FindingsList } from "./findings-list";
@@ -15,18 +16,7 @@ describe("FindingsList", () => {
 
 	it("lists findings with severity, rule, action, and a link to the run", async () => {
 		const owner = signInAs();
-		const agent = createAgent(owner.user_sso, {
-			title: "Credential grabber",
-			system_prompt: "Read the metadata endpoint.",
-			configurations: {
-				tools: [
-					{
-						kind: "http.get",
-						config: { url: "http://169.254.169.254/latest/meta-data/" },
-					},
-				],
-			},
-		});
+		const agent = createAgent(owner.user_sso, rogueAgentInput);
 		const run = createRun(agent);
 		runToCompletion(run);
 
@@ -37,9 +27,11 @@ describe("FindingsList", () => {
 			.getByText(/critical/i)
 			.closest("tr");
 		if (!row) throw new Error("expected a finding row");
-		expect(within(row).getByText("ssrf.metadata_endpoint")).toBeInTheDocument();
+		expect(
+			within(row).getByText("exfiltration.untrusted_destination"),
+		).toBeInTheDocument();
 		expect(within(row).getByText(/^killed$/i)).toBeInTheDocument();
-		expect(within(row).getByText("Credential grabber")).toBeInTheDocument();
+		expect(within(row).getByText("Secret leaker")).toBeInTheDocument();
 		expect(
 			within(row).getByRole("link", { name: /view run/i }),
 		).toHaveAttribute("href", `/runs/${run.id}`);
