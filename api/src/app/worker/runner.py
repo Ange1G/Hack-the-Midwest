@@ -15,6 +15,8 @@ class RunRequest:
     image: str
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
+    http_tools: list[dict[str, Any]] | None = None
+    http_credentials: dict[str, dict[str, str]] | None = None
 
 
 @dataclass(frozen=True)
