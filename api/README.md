@@ -155,14 +155,18 @@ curl -s -H "X-Dev-User-SSO: sso-user-a" \
 
 History: `GET /api/v1/agents/sso-user-a/executions`.
 
-The API only inserts a `queued` row. A worker claims it, starts a stub container, and the
-container POSTs `/api/v1/internal/executions/{id}/complete` with
+The API only inserts a `queued` row. A worker claims it, starts the Strands runner
+container, and the container POSTs `/api/v1/internal/executions/{id}/complete` with
 `X-Execution-Callback-Token`. That token is stored hashed; it is not a user SSO header.
+
+Put a platform-owned `OPENAI_API_KEY` in `api/.env` (never commit it). The worker injects
+it into the container. Without a key, the execution fails with `llm_unconfigured` and no
+container is started. The key must not appear in agent configuration or callback results.
 
 ### Local loop
 
 1. Postgres: `docker compose up -d`
-2. Build the stub image from the repo root: `docker build -t agent-platform-runner:local runner`
+2. Build the runner image from the repo root: `docker build -t agent-platform-runner:local runner`
 3. API (from `api/`): `uv run uvicorn app.main:app --app-dir src --reload --host 0.0.0.0 --port 8000`
 4. Worker (from `api/`): `uv run agent-worker`
 
@@ -170,5 +174,5 @@ The container must reach the API at `EXECUTION_CALLBACK_BASE_URL`
 (default `http://host.docker.internal:8000`). The worker always passes
 `--add-host=host.docker.internal:host-gateway` for Linux Docker.
 
-This image is plumbing only: it does not run Strands or call user connectors.
-See `spec/2026-10-10-agent-execution-mvp/`.
+The runner uses AWS Strands Agents with OpenAI (`system_prompt` from the agent record).
+HTTP/MCP tools are not wired yet. See `spec/2026-10-10-strands-openai-runner/`.
