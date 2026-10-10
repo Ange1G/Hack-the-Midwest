@@ -219,6 +219,15 @@ Since the sidebar no longer renders an `aside`, the scan's exclusion of the
 navigation bar no longer applies; the sidebar's own pairs are listed above for
 its owner.
 
+**Resolved (2026-10-10 20:55).** The backend owner's follow-up commit
+("update navigation aside component usage") adjusted the palette and cleared the
+pairs above. The one pair left was the inactive tab on the agent detail page,
+which shadcn renders at 60% of `--foreground` (4.1:1 on the muted tab
+background); `agent-detail.tsx` now renders inactive tabs at 80%. Observed on the
+merged branch: Biome reports only formatting in two of the owner's sidebar files
+(left for the owner), typecheck pass, Vitest 15 files / 86 tests pass, Playwright
+4 of 4 pass with the sidebar included in the WCAG scans.
+
 Acceptance criteria: AC1 to AC7 all satisfied by the above. AC2, AC3, AC4, AC5 and
 AC6 are exercised directly by `e2e/demo-flow.spec.ts` plus the component suites;
 AC7 by the list-state tests in `agent-list.test.tsx` and the state handling in each

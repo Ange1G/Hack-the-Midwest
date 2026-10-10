@@ -14,6 +14,11 @@ import { formatDateTime, formatDuration } from "#/lib/format";
 import { minutesToTime } from "#/lib/http-contract";
 import { textLinkClass } from "#/lib/styles";
 
+// shadcn renders an inactive tab at 60% of --foreground, which is 4.1:1 on the
+// muted tab background with this palette; 80% keeps the resting state visibly
+// quieter while clearing the WCAG AA 4.5:1 ratio.
+const tabTriggerClass = "data-[state=inactive]:text-foreground/80";
+
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_LABELS = [
 	"January",
@@ -100,8 +105,12 @@ export function AgentDetail({
 
 			<Tabs defaultValue="overview">
 				<TabsList>
-					<TabsTrigger value="overview">Overview</TabsTrigger>
-					<TabsTrigger value="runs">Runs</TabsTrigger>
+					<TabsTrigger value="overview" className={tabTriggerClass}>
+						Overview
+					</TabsTrigger>
+					<TabsTrigger value="runs" className={tabTriggerClass}>
+						Runs
+					</TabsTrigger>
 				</TabsList>
 				<TabsContent value="overview" className="mt-4 space-y-6">
 					<Card className="island-shell">
