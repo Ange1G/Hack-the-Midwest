@@ -19,6 +19,15 @@ def test_docker_command_isolates_container_and_passes_callback_env() -> None:
             image="agent-platform-runner:local",
             openai_api_key="sk-secret-do-not-leak",
             openai_model="gpt-4o-mini",
+            http_tools=[
+                {
+                    "id": "11111111-1111-1111-1111-111111111111",
+                    "name": "list_issues",
+                    "method": "GET",
+                    "URL": "https://api.example.com/issues",
+                }
+            ],
+            http_credentials={"11111111-1111-1111-1111-111111111111": {"xApiKey": "key-live"}},
         )
     )
     joined = " ".join(cmd)
@@ -34,8 +43,14 @@ def test_docker_command_isolates_container_and_passes_callback_env() -> None:
     assert "OPENAI_MODEL=gpt-4o-mini" in cmd
     assert "agent-platform-runner:local" == cmd[-1]
     manifest_flag = next(item for item in cmd if item.startswith("AGENT_MANIFEST="))
+    tools_flag = next(item for item in cmd if item.startswith("HTTP_TOOLS_JSON="))
+    creds_flag = next(item for item in cmd if item.startswith("HTTP_CREDENTIALS_JSON="))
     assert "sk-secret" not in manifest_flag
+    assert "key-live" not in manifest_flag
+    assert "key-live" not in tools_flag
     assert "Be terse." in manifest_flag
+    assert "https://api.example.com/issues" in tools_flag
+    assert "key-live" in creds_flag
 
 
 def test_docker_command_omits_openai_key_when_missing() -> None:
