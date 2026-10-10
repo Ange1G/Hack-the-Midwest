@@ -1,17 +1,26 @@
 import asyncio
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
+from app.domains.agents.models import Agent
 from app.domains.agents.repository import SqlAlchemyAgentRepository
+from app.domains.connectors.repository import SqlAlchemyConnectorRepository
 from app.domains.executions.models import ExecutionStatus
 from app.domains.executions.repository import SqlAlchemyExecutionRepository, is_terminal
 from app.domains.executions.service import agent_manifest
 from app.domains.executions.tokens import generate_callback_token, hash_callback_token
+from app.worker.bundle import (
+    BundleBuildError,
+    HttpToolBundle,
+    build_http_tool_bundle,
+    cipher_from_settings,
+    referenced_connector_ids,
+)
 from app.worker.runner import ContainerRunner, RunOutcome, RunRequest
 
 
@@ -21,6 +30,7 @@ def platform_openai_key(settings: Settings) -> str | None:
         return None
     value = secret.get_secret_value().strip()
     return value or None
+
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +44,8 @@ class ClaimedJob:
     owner_user_sso: str
     callback_token: str
     manifest: dict[str, Any]
+    http_tools: list[dict[str, Any]] = field(default_factory=list)
+    http_credentials: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 async def process_once(
@@ -41,7 +53,7 @@ async def process_once(
     runner: ContainerRunner,
     settings: Settings,
 ) -> bool:
-    claimed = await _claim(session_factory)
+    claimed = await _claim(session_factory, settings)
     if claimed is None:
         return False
 
@@ -66,6 +78,8 @@ async def process_once(
         image=settings.execution_runner_image,
         openai_api_key=openai_key,
         openai_model=settings.openai_model,
+        http_tools=claimed.http_tools,
+        http_credentials=claimed.http_credentials or None,
     )
     try:
         outcome = await runner.run(request)
@@ -91,11 +105,14 @@ async def run_forever(
             await asyncio.sleep(settings.worker_poll_interval_seconds)
 
 
-async def _claim(session_factory: async_sessionmaker[AsyncSession]) -> ClaimedJob | None:
+async def _claim(
+    session_factory: async_sessionmaker[AsyncSession], settings: Settings
+) -> ClaimedJob | None:
     token = generate_callback_token()
     async with session_factory() as session:
         executions = SqlAlchemyExecutionRepository(session)
         agents = SqlAlchemyAgentRepository(session)
+        connectors = SqlAlchemyConnectorRepository(session)
         execution = await executions.claim_next(hash_callback_token(token))
         if execution is None:
             return None
@@ -108,13 +125,35 @@ async def _claim(session_factory: async_sessionmaker[AsyncSession]) -> ClaimedJo
                 error_message="Agent was not found when the run was claimed",
             )
             return None
+        try:
+            bundle = await _http_bundle(agent, connectors, settings)
+        except BundleBuildError as exc:
+            await executions.fail_if_running(
+                execution.id,
+                status=ExecutionStatus.FAILED.value,
+                error_code=exc.code,
+                error_message=exc.message,
+            )
+            return None
         return ClaimedJob(
             execution_id=execution.id,
             agent_id=agent.id,
             owner_user_sso=execution.owner_user_sso,
             callback_token=token,
             manifest=agent_manifest(agent),
+            http_tools=bundle.tools,
+            http_credentials=bundle.credentials,
         )
+
+
+async def _http_bundle(
+    agent: Agent,
+    connectors: SqlAlchemyConnectorRepository,
+    settings: Settings,
+) -> HttpToolBundle:
+    ids = referenced_connector_ids(agent)
+    owned = await connectors.owned_with_secrets(agent.owner_user_sso, ids)
+    return build_http_tool_bundle(agent, owned, cipher_from_settings(settings))
 
 
 async def _reconcile(
