@@ -175,20 +175,25 @@ export function useAgentRuns(agentId: string) {
 	return useQuery(agentRunsQueryOptions(agentId));
 }
 
-export function useStartRun(agentId: string) {
+export function useStartRun(agentId?: string) {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: () => {
+		mutationFn: (explicitId?: string) => {
+			const id = explicitId ?? agentId;
+			if (!id) {
+				throw new ApiError(400, "invalid_request", "Agent id is required");
+			}
 			const user = requireUser();
-			return api.post(
-				`${agentsPath(user.user_sso)}/${agentId}/runs`,
-				runSchema,
-			);
+			return api.post(`${agentsPath(user.user_sso)}/${id}/runs`, runSchema);
 		},
 		onSuccess: (run: Run) => {
 			queryClient.setQueryData(queryKeys.run(run.id), run);
 			void queryClient.invalidateQueries({
-				queryKey: queryKeys.agent(agentId),
+				queryKey: queryKeys.agent(run.agent_id),
+			});
+			void queryClient.invalidateQueries({ queryKey: queryKeys.agents });
+			void queryClient.invalidateQueries({
+				queryKey: queryKeys.agentRuns(run.agent_id),
 			});
 		},
 	});
