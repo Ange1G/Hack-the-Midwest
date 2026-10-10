@@ -1,62 +1,19 @@
-# Constitution
+# Frontend agent notes
 
-> requirements:
-- users to create accounts
-- users to spin up their own agents and configure to their own use case
-	- we provide primitives such as HTTP.GET, HTTP.POST, MCP connectors, database connectors, etc
-- distributed task queue
-	- run jobs to monitor long running agents
-	- run agents to monitor user agents against malware, suspicious / banned activity
+Platform constitution, architecture, and SDLC live at the **repository root**:
 
-# Project
+- [../AGENTS.md](../AGENTS.md) — requirements, security, testing, spec-driven workflow
+- [../README.md](../README.md) — system overview and tech stack
 
-# Roadmap
+If anything here conflicts with root docs, follow the root.
 
-[x] Scaffold project
-[] Create MVP frontend before polishing
-[] Create MVP API before polishing
-[] Create MVP backend before polishing
-[] tbd
+## Frontend scope
 
-# Principles
+- React, TypeScript, TanStack Router, shadcn/ui (see [README.md](../README.md)).
+- Use shadcn CLI to add components (see [.cursorrules](.cursorrules)).
+- Tests: Vitest (unit/integration), Playwright (e2e), per root AGENTS.md quality control.
 
-# Tech Stack
+## Local conventions
 
-- fastapi (python)
-- postgres sql
-- tanstack / react
-- shadcn
-
-# Software Development Life-cycle
-
-## Quality Control
-
-playwright for FE e2e
-vitest FE unit tests / integration
-
-python test for unit tests / integration FASTAPI
-
-## Testing
-
-tdd
-
-## Implementation
-
-
-
-### Frontend
-
-### Backend
-
-## Review
-
-human-in-loop & agent review
-
-## Shipping
-
-ensure all tests pass, feature/code fulfills original ask and is NOT technical debt
-
-# Rules
-
-TBD
-
+- Keep server state, client state, and form state distinct.
+- Treat API contracts as defined by the backend; verify routes in `api/` before wiring UI.
