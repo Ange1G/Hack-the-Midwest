@@ -27,26 +27,19 @@ async function expectAccessible(page: Page, screenName: string) {
 	);
 }
 
-test("signed-out screens have no serious accessibility violations", async ({
+test("the sign-in screen has no serious accessibility violations", async ({
 	page,
 }) => {
 	await page.goto("/login");
 	await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
 	await expectAccessible(page, "login");
-
-	await page.goto("/signup");
-	await expect(
-		page.getByRole("button", { name: "Create account" }),
-	).toBeVisible();
-	await expectAccessible(page, "signup");
 });
 
 test("signed-in screens have no serious accessibility violations", async ({
 	page,
 }) => {
 	await page.goto("/login");
-	await page.getByLabel("Email", { exact: true }).fill("admin@example.com");
-	await page.getByLabel("Password", { exact: true }).fill("password");
+	await page.getByLabel("SSO id", { exact: true }).fill("admin");
 	await page.getByRole("button", { name: "Sign in" }).click();
 	await expect(
 		page.getByRole("heading", { name: "Agents", exact: true }),

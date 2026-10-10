@@ -12,7 +12,8 @@ import { useCreateAgent, useToolDefinitions } from "#/lib/api/queries";
 import {
 	type Agent,
 	agentInputSchema,
-	type ToolConfigInput,
+	type ToolConfig,
+	type ToolCredentials,
 	type ToolDefinition,
 } from "#/lib/api/schemas";
 
@@ -62,22 +63,24 @@ export function validateTools(
 	return errors;
 }
 
+// Credentials travel beside the configuration, never inside it, so the
+// backend can store them in a secret store instead of the agent's JSON.
 export function buildTools(
 	definitions: ToolDefinition[],
 	drafts: Drafts,
-): ToolConfigInput[] {
-	const tools: ToolConfigInput[] = [];
+): { tools: ToolConfig[]; credentials: ToolCredentials[] } {
+	const tools: ToolConfig[] = [];
+	const credentials: ToolCredentials[] = [];
 	for (const definition of definitions) {
 		const draft = drafts[definition.kind];
 		if (!draft?.enabled) continue;
-		const credentials = trimValues(draft.credentials);
-		tools.push({
-			kind: definition.kind,
-			config: trimValues(draft.config),
-			...(Object.keys(credentials).length > 0 ? { credentials } : {}),
-		});
+		tools.push({ kind: definition.kind, config: trimValues(draft.config) });
+		const values = trimValues(draft.credentials);
+		if (Object.keys(values).length > 0) {
+			credentials.push({ tool: definition.kind, values });
+		}
 	}
-	return tools;
+	return { tools, credentials };
 }
 
 export function AgentForm({
@@ -119,11 +122,13 @@ function AgentFormFields({
 			const errors = validateTools(definitions, drafts);
 			setToolErrors(errors);
 			if (Object.keys(errors).length > 0) return;
+			const { tools, credentials } = buildTools(definitions, drafts);
 			createAgent.mutate(
 				{
-					name: value.name.trim(),
-					instructions: value.instructions.trim(),
-					tools: buildTools(definitions, drafts),
+					title: value.name.trim(),
+					system_prompt: value.instructions.trim(),
+					configurations: { tools },
+					...(credentials.length > 0 ? { credentials } : {}),
 				},
 				{ onSuccess: (agent) => onCreated(agent) },
 			);
@@ -149,7 +154,7 @@ function AgentFormFields({
 			<div className="space-y-4">
 				<form.Field
 					name="name"
-					validators={{ onSubmit: agentInputSchema.shape.name }}
+					validators={{ onSubmit: agentInputSchema.shape.title }}
 				>
 					{(field) => (
 						<div className="space-y-1.5">
@@ -171,7 +176,7 @@ function AgentFormFields({
 
 				<form.Field
 					name="instructions"
-					validators={{ onSubmit: agentInputSchema.shape.instructions }}
+					validators={{ onSubmit: agentInputSchema.shape.system_prompt }}
 				>
 					{(field) => (
 						<div className="space-y-1.5">

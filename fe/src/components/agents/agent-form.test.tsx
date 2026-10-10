@@ -2,18 +2,14 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { server } from "#/mocks/server";
-import { createUser, mockState, publicUser } from "#/mocks/state";
+import { mockState } from "#/mocks/state";
 import { renderWithProviders } from "#/test/render";
+import { signInAs } from "#/test/session";
 import { AgentForm } from "./agent-form";
-
-function signIn() {
-	const user = createUser("angel@example.com", "correct horse battery");
-	mockState.session = publicUser(user);
-}
 
 describe("AgentForm", () => {
 	it("lists the platform tools and reveals a tool's fields when it is selected", async () => {
-		signIn();
+		signInAs();
 		const user = userEvent.setup();
 		renderWithProviders(<AgentForm onCreated={vi.fn()} />);
 
@@ -30,7 +26,7 @@ describe("AgentForm", () => {
 	});
 
 	it("requires a name and instructions before calling the API", async () => {
-		signIn();
+		signInAs();
 		const user = userEvent.setup();
 		const onCreated = vi.fn();
 		renderWithProviders(<AgentForm onCreated={onCreated} />);
@@ -46,7 +42,7 @@ describe("AgentForm", () => {
 	});
 
 	it("requires a selected tool's required config before calling the API", async () => {
-		signIn();
+		signInAs();
 		const user = userEvent.setup();
 		const onCreated = vi.fn();
 		renderWithProviders(<AgentForm onCreated={onCreated} />);
@@ -64,13 +60,13 @@ describe("AgentForm", () => {
 		expect(mockState.agents).toHaveLength(0);
 	});
 
-	it("creates the agent, sends credentials write-only, and reports the created agent", async () => {
-		signIn();
+	it("creates the agent with the backend's field names and keeps credentials out of configurations", async () => {
+		signInAs();
 		const user = userEvent.setup();
 		const onCreated = vi.fn();
 		let sent: unknown;
 		server.events.on("request:start", async ({ request }) => {
-			if (request.method === "POST" && request.url.endsWith("/agents")) {
+			if (request.method === "POST" && request.url.includes("/agents/")) {
 				sent = await request.clone().json();
 			}
 		});
@@ -91,21 +87,23 @@ describe("AgentForm", () => {
 
 		await waitFor(() =>
 			expect(onCreated).toHaveBeenCalledWith(
-				expect.objectContaining({ name: "Uptime checker" }),
+				expect.objectContaining({ title: "Uptime checker" }),
 			),
 		);
 		const created = onCreated.mock.calls[0]?.[0];
-		expect(created.tools).toEqual([
+		expect(created.configurations.tools).toEqual([
 			{ kind: "http.get", config: { url: "https://status.example.com" } },
 		]);
-		expect(sent).toMatchObject({
-			name: "Uptime checker",
-			tools: [
-				{
-					kind: "http.get",
-					config: { url: "https://status.example.com" },
-					credentials: { bearer_token: "secret-token" },
-				},
+		expect(sent).toEqual({
+			title: "Uptime checker",
+			system_prompt: "Check the status page every hour.",
+			configurations: {
+				tools: [
+					{ kind: "http.get", config: { url: "https://status.example.com" } },
+				],
+			},
+			credentials: [
+				{ tool: "http.get", values: { bearer_token: "secret-token" } },
 			],
 		});
 	});

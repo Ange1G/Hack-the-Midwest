@@ -6,7 +6,8 @@ import {
 } from "@tanstack/react-router";
 import { ApiUnavailable } from "#/components/api-unavailable";
 import { AppShell } from "#/components/layout/app-shell";
-import { meQueryOptions } from "#/lib/api/queries";
+import { queryKeys } from "#/lib/api/queries";
+import { getSessionUser } from "#/lib/api/session";
 import { ensureMocksReady } from "#/lib/mocks-ready";
 
 // Authenticated area. Rendered on the client only so the session check and
@@ -15,10 +16,11 @@ export const Route = createFileRoute("/_app")({
 	ssr: false,
 	beforeLoad: async ({ context }) => {
 		await ensureMocksReady();
-		const user = await context.queryClient.ensureQueryData(meQueryOptions());
+		const user = getSessionUser();
 		if (!user) {
 			throw redirect({ to: "/login" });
 		}
+		context.queryClient.setQueryData(queryKeys.me, user);
 		return { user };
 	},
 	errorComponent: ({ error, reset }) => (

@@ -4,28 +4,23 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	createAgent,
 	createRun,
-	createUser,
 	mockState,
-	publicUser,
 	runToCompletion,
 } from "#/mocks/state";
 import { renderWithProviders } from "#/test/render";
+import { signInAs } from "#/test/session";
 import { AgentDetail } from "./agent-detail";
 
-function signIn() {
-	const user = createUser("angel@example.com", "correct horse battery");
-	mockState.session = publicUser(user);
-	return publicUser(user);
-}
-
 function seedAgent() {
-	const owner = signIn();
-	return createAgent(owner, {
-		name: "Uptime checker",
-		instructions: "Check the status page every hour.",
-		tools: [
-			{ kind: "http.get", config: { url: "https://status.example.com" } },
-		],
+	const owner = signInAs();
+	return createAgent(owner.user_sso, {
+		title: "Uptime checker",
+		system_prompt: "Check the status page every hour.",
+		configurations: {
+			tools: [
+				{ kind: "http.get", config: { url: "https://status.example.com" } },
+			],
+		},
 	});
 }
 
@@ -87,7 +82,7 @@ describe("AgentDetail", () => {
 	});
 
 	it("shows an error state when the agent does not exist", async () => {
-		signIn();
+		signInAs();
 		renderWithProviders(
 			<AgentDetail agentId="agt_missing" onRunStarted={vi.fn()} />,
 		);

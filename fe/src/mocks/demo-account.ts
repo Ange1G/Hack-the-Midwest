@@ -1,4 +1,3 @@
-// Credentials of the seeded demo account in mock mode. Kept in a file with no
-// imports so the login page can show them without pulling in the mock itself.
-export const DEMO_EMAIL = "admin@example.com";
-export const DEMO_PASSWORD = "password";
+// Identity that owns the seeded demo data in mock mode. Any SSO id signs in;
+// this one has agents, runs, and a finding ready to show.
+export const DEMO_USER_SSO = "admin";

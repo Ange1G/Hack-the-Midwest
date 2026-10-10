@@ -42,7 +42,7 @@ export function AgentDetail({
 	return (
 		<>
 			<PageHeader
-				title={data.name}
+				title={data.title}
 				description={`Created ${formatDateTime(data.created_at)}`}
 				action={
 					<Button
@@ -92,7 +92,9 @@ export function AgentDetail({
 							<CardTitle>Instructions</CardTitle>
 						</CardHeader>
 						<CardContent>
-							<p className="whitespace-pre-wrap text-sm">{data.instructions}</p>
+							<p className="whitespace-pre-wrap text-sm">
+								{data.system_prompt}
+							</p>
 						</CardContent>
 					</Card>
 					<Card>
@@ -100,13 +102,13 @@ export function AgentDetail({
 							<CardTitle>Tools</CardTitle>
 						</CardHeader>
 						<CardContent>
-							{data.tools.length === 0 ? (
+							{data.configurations.tools.length === 0 ? (
 								<p className="text-sm text-muted-foreground">
 									This agent has no tools.
 								</p>
 							) : (
 								<ul className="space-y-4">
-									{data.tools.map((tool) => (
+									{data.configurations.tools.map((tool) => (
 										<li key={toolKey(tool)} className="space-y-2">
 											<Badge variant="outline">{tool.kind}</Badge>
 											<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">

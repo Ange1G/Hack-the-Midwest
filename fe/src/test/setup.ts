@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll } from "vitest";
+import { clearSessionUser } from "#/lib/api/session";
 import { server } from "#/mocks/server";
 import { resetMockState } from "#/mocks/state";
 
@@ -25,7 +26,9 @@ beforeAll(() => {
 
 afterEach(() => {
 	server.resetHandlers();
+	server.events.removeAllListeners();
 	resetMockState();
+	clearSessionUser();
 	cleanup();
 });
 

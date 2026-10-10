@@ -1,9 +1,8 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { AuthLayout } from "#/components/auth/auth-layout";
-import { LoginForm } from "#/components/auth/login-form";
+import { SignInForm } from "#/components/auth/sign-in-form";
 import { ensureMocksReady } from "#/lib/mocks-ready";
-import { textLinkClass } from "#/lib/styles";
-import { DEMO_EMAIL, DEMO_PASSWORD } from "#/mocks/demo-account";
+import { DEMO_USER_SSO } from "#/mocks/demo-account";
 
 export const Route = createFileRoute("/login")({
 	ssr: false,
@@ -17,20 +16,12 @@ function LoginPage() {
 		<AuthLayout
 			title="Sign in"
 			description="Build, run, and monitor your own agents."
-			footer={
-				<p>
-					New here?{" "}
-					<Link to="/signup" className={textLinkClass}>
-						Create an account
-					</Link>
-				</p>
-			}
+			footer={<p>Your agents, tools, and credentials stay private to you.</p>}
 		>
-			<LoginForm onSuccess={() => navigate({ to: "/agents" })} />
+			<SignInForm onSuccess={() => navigate({ to: "/agents" })} />
 			{import.meta.env.VITE_USE_MOCKS === "true" ? (
 				<p className="mt-4 text-xs text-muted-foreground">
-					Mock mode. Demo account: {DEMO_EMAIL} / {DEMO_PASSWORD}, or sign up
-					with any email to start from scratch.
+					Mock mode. Any SSO id works; {DEMO_USER_SSO} already has demo data.
 				</p>
 			) : null}
 		</AuthLayout>

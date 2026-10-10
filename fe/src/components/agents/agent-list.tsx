@@ -13,8 +13,8 @@ import { toolKey } from "#/lib/tools";
 
 const columns: DataTableColumn<Agent>[] = [
 	{
-		id: "name",
-		accessorFn: (agent) => agent.name,
+		id: "title",
+		accessorFn: (agent) => agent.title,
 		header: "Name",
 		cell: ({ row }) => (
 			<div className="flex items-center gap-2">
@@ -23,7 +23,7 @@ const columns: DataTableColumn<Agent>[] = [
 					params={{ agentId: row.original.id }}
 					className={textLinkClass}
 				>
-					{row.original.name}
+					{row.original.title}
 				</Link>
 				{row.original.flagged ? (
 					<ToneBadge tone="danger">Flagged</ToneBadge>
@@ -37,7 +37,7 @@ const columns: DataTableColumn<Agent>[] = [
 		enableSorting: false,
 		cell: ({ row }) => (
 			<div className="flex flex-wrap gap-1">
-				{row.original.tools.map((tool) => (
+				{row.original.configurations.tools.map((tool) => (
 					<Badge key={toolKey(tool)} variant="outline">
 						{tool.kind}
 					</Badge>
@@ -85,7 +85,9 @@ export function AgentList() {
 		);
 	}
 
-	if (agents.data.length === 0) {
+	const { items, pagination } = agents.data;
+
+	if (items.length === 0) {
 		return (
 			<EmptyState
 				title="No agents yet"
@@ -102,6 +104,13 @@ export function AgentList() {
 	}
 
 	return (
-		<DataTable columns={columns} data={agents.data} caption="Your agents" />
+		<>
+			<DataTable columns={columns} data={items} caption="Your agents" />
+			{pagination && pagination.total_items > items.length ? (
+				<p className="mt-3 text-sm text-muted-foreground">
+					Showing {items.length} of {pagination.total_items} agents.
+				</p>
+			) : null}
+		</>
 	);
 }

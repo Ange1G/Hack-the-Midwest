@@ -4,34 +4,24 @@ import { delay, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { API_BASE_URL } from "#/lib/api/client";
 import { server } from "#/mocks/server";
-import {
-	createAgent,
-	createRun,
-	createUser,
-	mockState,
-	publicUser,
-	runToCompletion,
-} from "#/mocks/state";
+import { createAgent, createRun, runToCompletion } from "#/mocks/state";
 import { renderWithProviders } from "#/test/render";
+import { signInAs } from "#/test/session";
 import { AgentList } from "./agent-list";
-
-function signIn() {
-	const user = createUser("angel@example.com", "correct horse battery");
-	mockState.session = publicUser(user);
-	return publicUser(user);
-}
 
 describe("AgentList", () => {
 	it("shows a loading state while agents are being fetched", async () => {
-		signIn();
-		server.use(http.get(`${API_BASE_URL}/agents`, () => delay("infinite")));
+		signInAs();
+		server.use(
+			http.get(`${API_BASE_URL}/agents/:sso`, () => delay("infinite")),
+		);
 		renderWithProviders(<AgentList />);
 
 		expect(await screen.findByRole("status")).toHaveTextContent(/loading/i);
 	});
 
 	it("shows an empty state with a link to create the first agent", async () => {
-		signIn();
+		signInAs();
 		renderWithProviders(<AgentList />);
 
 		expect(await screen.findByText(/no agents yet/i)).toBeInTheDocument();
@@ -45,33 +35,37 @@ describe("AgentList", () => {
 		renderWithProviders(<AgentList />);
 
 		const alert = await screen.findByRole("alert");
-		expect(alert).toHaveTextContent(/sign in to continue/i);
+		expect(alert).toHaveTextContent(/sign in/i);
 
-		signIn();
+		signInAs();
 		await user.click(screen.getByRole("button", { name: /try again/i }));
 
 		expect(await screen.findByText(/no agents yet/i)).toBeInTheDocument();
 	});
 
 	it("lists agents with tools, last run status, and a flagged marker", async () => {
-		const owner = signIn();
-		const safe = createAgent(owner, {
-			name: "Uptime checker",
-			instructions: "Check the status page.",
-			tools: [
-				{ kind: "http.get", config: { url: "https://status.example.com" } },
-			],
+		const owner = signInAs();
+		const safe = createAgent(owner.user_sso, {
+			title: "Uptime checker",
+			system_prompt: "Check the status page.",
+			configurations: {
+				tools: [
+					{ kind: "http.get", config: { url: "https://status.example.com" } },
+				],
+			},
 		});
 		runToCompletion(createRun(safe));
-		const rogue = createAgent(owner, {
-			name: "Credential grabber",
-			instructions: "Read the metadata endpoint.",
-			tools: [
-				{
-					kind: "http.get",
-					config: { url: "http://169.254.169.254/latest/meta-data/" },
-				},
-			],
+		const rogue = createAgent(owner.user_sso, {
+			title: "Credential grabber",
+			system_prompt: "Read the metadata endpoint.",
+			configurations: {
+				tools: [
+					{
+						kind: "http.get",
+						config: { url: "http://169.254.169.254/latest/meta-data/" },
+					},
+				],
+			},
 		});
 		runToCompletion(createRun(rogue));
 

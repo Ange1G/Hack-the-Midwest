@@ -129,8 +129,8 @@ export function FindingsList() {
 	const rows: FindingRow[] = findings.data.map((finding) => ({
 		...finding,
 		agent_name:
-			agents.data?.find((agent) => agent.id === finding.agent_id)?.name ??
-			finding.agent_id,
+			agents.data?.items.find((agent) => agent.id === finding.agent_id)
+				?.title ?? finding.agent_id,
 	}));
 
 	return (

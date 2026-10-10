@@ -1,47 +1,55 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
+import { server } from "#/mocks/server";
 import { createQueryWrapper } from "#/test/query";
+import { signInAs } from "#/test/session";
+import { API_BASE_URL, api } from "./client";
 import {
 	isActiveRunStatus,
 	useAgent,
 	useAgents,
 	useCreateAgent,
 	useFindings,
-	useLogin,
-	useLogout,
 	useMe,
 	useRun,
 	useRunEvents,
-	useSignup,
+	useSignIn,
+	useSignOut,
 	useStartRun,
 	useToolDefinitions,
 } from "./queries";
-import type { AgentInput, RunStatus } from "./schemas";
+import { type AgentInput, agentSchema, type RunStatus } from "./schemas";
+import { getSessionUser } from "./session";
 
 type Wrapper = ReturnType<typeof createQueryWrapper>;
 
 const safeAgent: AgentInput = {
-	name: "Uptime checker",
-	instructions: "Check the status page and summarise it.",
-	tools: [{ kind: "http.get", config: { url: "https://status.example.com" } }],
+	title: "Uptime checker",
+	system_prompt: "Check the status page and summarise it.",
+	configurations: {
+		tools: [
+			{ kind: "http.get", config: { url: "https://status.example.com" } },
+		],
+	},
 };
 
 const rogueAgent: AgentInput = {
-	name: "Credential grabber",
-	instructions: "Fetch the instance metadata and print it.",
-	tools: [
-		{
-			kind: "http.get",
-			config: { url: "http://169.254.169.254/latest/meta-data/" },
-		},
-	],
+	title: "Credential grabber",
+	system_prompt: "Fetch the instance metadata and print it.",
+	configurations: {
+		tools: [
+			{
+				kind: "http.get",
+				config: { url: "http://169.254.169.254/latest/meta-data/" },
+			},
+		],
+	},
 };
 
-async function loginAs(wrapper: Wrapper, email = "angel@example.com") {
-	const { result } = renderHook(() => useLogin(), { wrapper });
-	await act(() =>
-		result.current.mutateAsync({ email, password: "correct horse battery" }),
-	);
+async function signIn(wrapper: Wrapper, user_sso = "angel") {
+	const { result } = renderHook(() => useSignIn(), { wrapper });
+	return act(() => result.current.mutateAsync({ user_sso }));
 }
 
 async function createAgent(wrapper: Wrapper, input: AgentInput) {
@@ -65,8 +73,8 @@ describe("isActiveRunStatus", () => {
 	});
 });
 
-describe("auth hooks", () => {
-	it("useMe resolves to null when there is no session", async () => {
+describe("session hooks", () => {
+	it("useMe resolves to null without a session", async () => {
 		const { result } = renderHook(() => useMe(), {
 			wrapper: createQueryWrapper(),
 		});
@@ -74,52 +82,50 @@ describe("auth hooks", () => {
 		expect(result.current.data).toBeNull();
 	});
 
-	it("useSignup creates the session and useMe sees the user", async () => {
+	it("useSignIn verifies the identity against the API, stores it, and useMe sees it", async () => {
 		const wrapper = createQueryWrapper();
-		const signup = renderHook(() => useSignup(), { wrapper });
-		await act(() =>
-			signup.result.current.mutateAsync({
-				email: "new@example.com",
-				password: "correct horse battery",
-			}),
-		);
+		const user = await signIn(wrapper, "angel");
+		expect(user).toEqual({ user_sso: "angel" });
+		expect(getSessionUser()).toEqual({ user_sso: "angel" });
+
 		const me = renderHook(() => useMe(), { wrapper });
-		await waitFor(() =>
-			expect(me.result.current.data?.email).toBe("new@example.com"),
-		);
+		await waitFor(() => expect(me.result.current.data?.user_sso).toBe("angel"));
 	});
 
-	it("useLogin then useLogout clears the session", async () => {
-		const wrapper = createQueryWrapper();
-		await loginAs(wrapper);
-		const me = renderHook(() => useMe(), { wrapper });
-		await waitFor(() =>
-			expect(me.result.current.data?.email).toBe("angel@example.com"),
+	it("useSignIn surfaces an API failure and stores nothing", async () => {
+		server.use(
+			http.get(`${API_BASE_URL}/agents/:sso`, () => HttpResponse.error()),
 		);
-
-		const logout = renderHook(() => useLogout(), { wrapper });
-		await act(() => logout.result.current.mutateAsync());
-		await waitFor(() => expect(me.result.current.data).toBeNull());
-	});
-
-	it("useLogin surfaces a structured error for bad credentials", async () => {
-		const { result } = renderHook(() => useLogin(), {
+		const { result } = renderHook(() => useSignIn(), {
 			wrapper: createQueryWrapper(),
 		});
 		await act(async () => {
 			await result.current
-				.mutateAsync({ email: "angel@example.com", password: "short" })
+				.mutateAsync({ user_sso: "angel" })
 				.catch(() => undefined);
 		});
 		await waitFor(() => expect(result.current.isError).toBe(true));
-		expect(result.current.error).toMatchObject({ code: "invalid_credentials" });
+		expect(result.current.error).toMatchObject({ code: "network_error" });
+		expect(getSessionUser()).toBeNull();
+	});
+
+	it("useSignOut clears the session", async () => {
+		const wrapper = createQueryWrapper();
+		await signIn(wrapper);
+		const me = renderHook(() => useMe(), { wrapper });
+		await waitFor(() => expect(me.result.current.data?.user_sso).toBe("angel"));
+
+		const signOut = renderHook(() => useSignOut(), { wrapper });
+		await act(() => signOut.result.current.mutateAsync());
+		await waitFor(() => expect(me.result.current.data).toBeNull());
+		expect(getSessionUser()).toBeNull();
 	});
 });
 
 describe("tool definitions", () => {
 	it("lists the platform primitives", async () => {
 		const wrapper = createQueryWrapper();
-		await loginAs(wrapper);
+		await signIn(wrapper);
 		const { result } = renderHook(() => useToolDefinitions(), { wrapper });
 		await waitFor(() => expect(result.current.isSuccess).toBe(true));
 		const kinds = result.current.data?.map((tool) => tool.kind);
@@ -130,60 +136,76 @@ describe("tool definitions", () => {
 });
 
 describe("agent hooks", () => {
-	it("useAgents errors when unauthenticated", async () => {
+	it("useAgents errors with 401 when not signed in", async () => {
 		const { result } = renderHook(() => useAgents(), {
 			wrapper: createQueryWrapper(),
 		});
 		await waitFor(() => expect(result.current.isError).toBe(true));
-		expect(result.current.error).toMatchObject({ status: 401 });
+		expect(result.current.error).toMatchObject({
+			status: 401,
+			code: "unauthorized",
+		});
 	});
 
-	it("starts empty and shows a created agent in the list and by id", async () => {
+	it("starts empty, then shows a created agent in the list and by id", async () => {
 		const wrapper = createQueryWrapper();
-		await loginAs(wrapper);
+		await signIn(wrapper);
 
 		const list = renderHook(() => useAgents(), { wrapper });
 		await waitFor(() => expect(list.result.current.isSuccess).toBe(true));
-		expect(list.result.current.data).toEqual([]);
+		expect(list.result.current.data?.items).toEqual([]);
+		expect(list.result.current.data?.pagination?.total_items).toBe(0);
 
 		const created = await createAgent(wrapper, safeAgent);
 		expect(created).toMatchObject({
-			name: "Uptime checker",
+			title: "Uptime checker",
+			owner_user_sso: "angel",
 			flagged: false,
 			last_run: null,
 		});
-		expect(created.tools[0]).not.toHaveProperty("credentials");
+		expect(created.configurations.tools).toEqual(
+			safeAgent.configurations.tools,
+		);
+		expect(created.configurations.tools[0]).not.toHaveProperty("credentials");
 
-		await waitFor(() => expect(list.result.current.data).toHaveLength(1));
+		await waitFor(() =>
+			expect(list.result.current.data?.items).toHaveLength(1),
+		);
 
 		const byId = renderHook(() => useAgent(created.id), { wrapper });
 		await waitFor(() => expect(byId.result.current.data?.id).toBe(created.id));
 	});
 
-	it("keeps agents private to the user who created them", async () => {
+	it("keeps agents private to their owner", async () => {
 		const first = createQueryWrapper();
-		await loginAs(first, "first@example.com");
+		await signIn(first, "first");
 		await createAgent(first, safeAgent);
 
 		const second = createQueryWrapper();
-		await loginAs(second, "second@example.com");
+		await signIn(second, "second");
 		const list = renderHook(() => useAgents(), { wrapper: second });
 		await waitFor(() => expect(list.result.current.isSuccess).toBe(true));
-		expect(list.result.current.data).toEqual([]);
+		expect(list.result.current.data?.items).toEqual([]);
+	});
+
+	it("refuses to read another owner's agents, like the backend does", async () => {
+		signInAs("first");
+		const error = await api
+			.list("/agents/second", agentSchema)
+			.catch((e: unknown) => e);
+		expect(error).toMatchObject({ status: 403, code: "forbidden" });
 	});
 });
 
 describe("run hooks", () => {
 	it("starts a run queued and polls it through running to succeeded", async () => {
 		const wrapper = createQueryWrapper();
-		await loginAs(wrapper);
+		await signIn(wrapper);
 		const agent = await createAgent(wrapper, safeAgent);
 
 		const run = await startRun(wrapper, agent.id);
 		expect(run.status).toBe("queued");
 
-		// Record every status the hook renders, so intermediate states are
-		// observed even when polling is much faster than waitFor's own interval.
 		const seen: RunStatus[] = [];
 		const poll = renderHook(
 			() => {
@@ -200,7 +222,6 @@ describe("run hooks", () => {
 		);
 		expect(seen).toEqual(["queued", "running", "succeeded"]);
 		expect(poll.result.current.data?.output).toBeTruthy();
-		expect(poll.result.current.data?.finished_at).toBeTruthy();
 
 		const events = renderHook(
 			() => useRunEvents(run.id, { pollIntervalMs: 5 }),
@@ -220,7 +241,7 @@ describe("run hooks", () => {
 
 	it("kills a run whose HTTP tool targets the cloud metadata address and records a finding", async () => {
 		const wrapper = createQueryWrapper();
-		await loginAs(wrapper);
+		await signIn(wrapper);
 		const agent = await createAgent(wrapper, rogueAgent);
 		const run = await startRun(wrapper, agent.id);
 

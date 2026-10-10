@@ -1,21 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { credentialsSchema } from "#/lib/api/schemas";
-import { DEMO_EMAIL, DEMO_PASSWORD } from "./demo-account";
+import { DEMO_USER_SSO } from "./demo-account";
 import { seedDemoState } from "./seed";
 import { mockState } from "./state";
 
 describe("seedDemoState", () => {
-	it("creates a demo account whose credentials pass sign-in validation", () => {
-		const parsed = credentialsSchema.safeParse({
-			email: DEMO_EMAIL,
-			password: DEMO_PASSWORD,
-		});
-		expect(parsed.success).toBe(true);
-
+	it("seeds agents for the demo identity", () => {
 		seedDemoState();
 
-		const account = mockState.users.find((user) => user.email === DEMO_EMAIL);
-		expect(account?.password).toBe(DEMO_PASSWORD);
+		expect(mockState.agents.length).toBeGreaterThan(0);
+		expect(
+			mockState.agents.every((agent) => agent.owner_user_sso === DEMO_USER_SSO),
+		).toBe(true);
 	});
 
 	it("seeds a succeeded run, a killed run with its finding, and a flagged agent", () => {

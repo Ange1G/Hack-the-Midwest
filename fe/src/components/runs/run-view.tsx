@@ -69,7 +69,7 @@ export function RunView({
 	return (
 		<>
 			<PageHeader
-				title={agent.data?.name ?? "Run"}
+				title={agent.data?.title ?? "Run"}
 				description={`Run ${data.id}`}
 				action={<StatusBadge status={data.status} />}
 			/>

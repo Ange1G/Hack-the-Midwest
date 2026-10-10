@@ -1,229 +1,237 @@
 import { HttpResponse, http } from "msw";
 import type { ZodError } from "zod";
-import { API_BASE_URL } from "#/lib/api/client";
-import type { User } from "#/lib/api/schemas";
-import { agentInputSchema, credentialsSchema } from "#/lib/api/schemas";
+import { API_BASE_URL, DEV_USER_HEADER } from "#/lib/api/client";
+import {
+	type Agent,
+	agentInputSchema,
+	type Pagination,
+	type Run,
+} from "#/lib/api/schemas";
 import {
 	advanceRun,
 	createAgent,
 	createRun,
-	createUser,
-	type MockAgent,
 	mockState,
 	now,
-	publicAgent,
-	publicUser,
 	toolDefinitions,
 } from "./state";
 
-// Handlers implementing API contract v0 for development and tests.
-// See spec/2026-10-10-frontend-dashboard/plan.md.
+// Mirrors the backend (envelope, /api/v1, X-Dev-User-SSO, pagination, error
+// codes) for the endpoints it implements, and extends it with the endpoints
+// proposed in spec/2026-10-10-frontend-dashboard/plan.md.
+
+const DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 100;
 
 const url = (path: string) => `${API_BASE_URL}${path}`;
 
-function error(
+let requestCounter = 0;
+function metadata() {
+	requestCounter += 1;
+	return { request_id: `mock-${requestCounter}` };
+}
+
+function ok<T>(
+	data: T,
+	init: { status?: number; pagination?: Pagination | null } = {},
+) {
+	return HttpResponse.json(
+		{
+			data,
+			error: null,
+			metadata: metadata(),
+			pagination: init.pagination ?? null,
+		},
+		{ status: init.status ?? 200 },
+	);
+}
+
+function fail(
 	status: number,
 	code: string,
 	message: string,
-	fields?: Record<string, string>,
+	details: Record<string, unknown> | null = null,
 ) {
 	return HttpResponse.json(
-		{ error: { code, message, ...(fields ? { fields } : {}) } },
+		{
+			data: null,
+			error: { code, message, details },
+			metadata: metadata(),
+			pagination: null,
+		},
 		{ status },
 	);
 }
 
-function fieldErrors(zodError: ZodError): Record<string, string> {
-	const fields: Record<string, string> = {};
-	for (const issue of zodError.issues) {
-		const key = issue.path.join(".") || "_";
-		if (!(key in fields)) fields[key] = issue.message;
-	}
-	return fields;
+const unauthorized = () =>
+	fail(
+		401,
+		"unauthorized",
+		"Missing X-Dev-User-SSO header (required in development/test)",
+	);
+const forbidden = () =>
+	fail(403, "forbidden", "You may not access agents for another user");
+const notFound = () => fail(404, "not_found", "Not found.");
+
+function validationError(error: ZodError) {
+	return fail(422, "validation_error", "Request validation failed", {
+		errors: error.issues.map((issue) => ({
+			loc: ["body", ...issue.path.map(String)],
+			msg: issue.message,
+			type: issue.code,
+		})),
+	});
 }
 
-const unauthenticated = () =>
-	error(401, "unauthenticated", "Sign in to continue.");
-const notFound = () => error(404, "not_found", "Not found.");
+function caller(request: Request): string | null {
+	return request.headers.get(DEV_USER_HEADER);
+}
 
-function ownAgent(user: User, id: string): MockAgent | undefined {
+function paginate<T>(
+	items: T[],
+	request: Request,
+): { data: T[]; pagination: Pagination } {
+	const params = new URL(request.url).searchParams;
+	const page = Math.max(1, Number(params.get("page")) || 1);
+	const requested = Number(params.get("page_size")) || DEFAULT_PAGE_SIZE;
+	const page_size = Math.min(Math.max(requested, 1), MAX_PAGE_SIZE);
+	const total_items = items.length;
+	const start = (page - 1) * page_size;
+	return {
+		data: items.slice(start, start + page_size),
+		pagination: {
+			page,
+			page_size,
+			total_items,
+			total_pages: total_items === 0 ? 0 : Math.ceil(total_items / page_size),
+		},
+	};
+}
+
+function ownAgent(owner: string, id: string): Agent | undefined {
 	return mockState.agents.find(
-		(agent) => agent.id === id && agent.owner_id === user.id,
+		(agent) => agent.id === id && agent.owner_user_sso === owner,
 	);
 }
 
-function ownRun(user: User, id: string) {
+function ownRun(owner: string, id: string): Run | undefined {
 	const run = mockState.runs.find((item) => item.id === id);
 	if (!run) return undefined;
-	return ownAgent(user, run.agent_id) ? run : undefined;
+	return ownAgent(owner, run.agent_id) ? run : undefined;
 }
 
+const newestFirst = <T extends { created_at: string }>(items: T[]) =>
+	items.slice().sort((a, b) => b.created_at.localeCompare(a.created_at));
+
 export const handlers = [
-	http.post(url("/auth/signup"), async ({ request }) => {
-		const parsed = credentialsSchema.safeParse(await request.json());
-		if (!parsed.success) {
-			return error(
-				422,
-				"validation_error",
-				"Check the highlighted fields.",
-				fieldErrors(parsed.error),
-			);
-		}
-		if (mockState.users.some((user) => user.email === parsed.data.email)) {
-			return error(
-				409,
-				"email_taken",
-				"An account with that email already exists.",
-			);
-		}
-		const user = createUser(parsed.data.email, parsed.data.password);
-		mockState.session = publicUser(user);
-		return HttpResponse.json(publicUser(user), { status: 201 });
+	http.get(url("/tools"), ({ request }) => {
+		if (!caller(request)) return unauthorized();
+		return ok(toolDefinitions);
 	}),
 
-	http.post(url("/auth/login"), async ({ request }) => {
-		const parsed = credentialsSchema.safeParse(await request.json());
-		if (!parsed.success) {
-			return error(
-				401,
-				"invalid_credentials",
-				"Email or password is incorrect.",
-			);
-		}
-		let user = mockState.users.find((item) => item.email === parsed.data.email);
-		if (user && user.password !== parsed.data.password) {
-			return error(
-				401,
-				"invalid_credentials",
-				"Email or password is incorrect.",
-			);
-		}
-		// Mock convenience: an unknown email with a well-formed password signs in
-		// as a new account so the demo never dead-ends on a login screen.
-		if (!user) user = createUser(parsed.data.email, parsed.data.password);
-		mockState.session = publicUser(user);
-		return HttpResponse.json(publicUser(user));
+	// Implemented in the backend.
+	http.get(url("/agents/:sso"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const items = newestFirst(
+			mockState.agents.filter((agent) => agent.owner_user_sso === owner),
+		);
+		const page = paginate(items, request);
+		return ok(page.data, { pagination: page.pagination });
 	}),
 
-	http.post(url("/auth/logout"), () => {
-		mockState.session = null;
-		return new HttpResponse(null, { status: 204 });
-	}),
-
-	http.get(url("/auth/me"), () => {
-		const user = mockState.session;
-		return user ? HttpResponse.json(user) : unauthenticated();
-	}),
-
-	http.get(url("/tools"), () => {
-		if (!mockState.session) return unauthenticated();
-		return HttpResponse.json({ items: toolDefinitions });
-	}),
-
-	http.get(url("/agents"), () => {
-		const user = mockState.session;
-		if (!user) return unauthenticated();
-		const items = mockState.agents
-			.filter((agent) => agent.owner_id === user.id)
-			.map(publicAgent);
-		return HttpResponse.json({ items });
-	}),
-
-	http.post(url("/agents"), async ({ request }) => {
-		const user = mockState.session;
-		if (!user) return unauthenticated();
+	// Proposed.
+	http.post(url("/agents/:sso"), async ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
 		const parsed = agentInputSchema.safeParse(await request.json());
-		if (!parsed.success) {
-			return error(
-				422,
-				"validation_error",
-				"Check the highlighted fields.",
-				fieldErrors(parsed.error),
-			);
-		}
-		const agent = createAgent(user, parsed.data);
-		return HttpResponse.json(publicAgent(agent), { status: 201 });
+		if (!parsed.success) return validationError(parsed.error);
+		return ok(createAgent(owner, parsed.data), { status: 201 });
 	}),
 
-	http.get(url("/agents/:id"), ({ params }) => {
-		const user = mockState.session;
-		if (!user) return unauthenticated();
-		const agent = ownAgent(user, String(params.id));
-		return agent ? HttpResponse.json(publicAgent(agent)) : notFound();
+	http.get(url("/agents/:sso/:id"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const agent = ownAgent(owner, String(params.id));
+		return agent ? ok(agent) : notFound();
 	}),
 
-	http.delete(url("/agents/:id"), ({ params }) => {
-		const user = mockState.session;
-		if (!user) return unauthenticated();
-		const agent = ownAgent(user, String(params.id));
+	http.delete(url("/agents/:sso/:id"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const agent = ownAgent(owner, String(params.id));
 		if (!agent) return notFound();
 		mockState.agents = mockState.agents.filter((item) => item !== agent);
 		return new HttpResponse(null, { status: 204 });
 	}),
 
-	http.get(url("/agents/:id/runs"), ({ params }) => {
-		const user = mockState.session;
-		if (!user) return unauthenticated();
-		const agent = ownAgent(user, String(params.id));
+	http.get(url("/agents/:sso/:id/runs"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const agent = ownAgent(owner, String(params.id));
 		if (!agent) return notFound();
-		const items = mockState.runs
-			.filter((run) => run.agent_id === agent.id)
-			.slice()
-			.reverse();
-		return HttpResponse.json({ items });
+		const items = newestFirst(
+			mockState.runs.filter((run) => run.agent_id === agent.id),
+		);
+		const page = paginate(items, request);
+		return ok(page.data, { pagination: page.pagination });
 	}),
 
-	http.post(url("/agents/:id/runs"), ({ params }) => {
-		const user = mockState.session;
-		if (!user) return unauthenticated();
-		const agent = ownAgent(user, String(params.id));
+	http.post(url("/agents/:sso/:id/runs"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const agent = ownAgent(owner, String(params.id));
 		if (!agent) return notFound();
-		const run = createRun(agent);
-		return HttpResponse.json(run, { status: 202 });
+		return ok(createRun(agent), { status: 202 });
 	}),
 
-	http.get(url("/runs/:id"), ({ params }) => {
-		const user = mockState.session;
-		if (!user) return unauthenticated();
-		const run = ownRun(user, String(params.id));
+	http.get(url("/runs/:id"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		const run = ownRun(owner, String(params.id));
 		if (!run) return notFound();
 		advanceRun(run);
-		return HttpResponse.json(run);
+		return ok(run);
 	}),
 
-	http.get(url("/runs/:id/events"), ({ params }) => {
-		const user = mockState.session;
-		if (!user) return unauthenticated();
-		const run = ownRun(user, String(params.id));
+	http.get(url("/runs/:id/events"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		const run = ownRun(owner, String(params.id));
 		if (!run) return notFound();
-		const items = mockState.events.filter((event) => event.run_id === run.id);
-		return HttpResponse.json({ items });
+		return ok(mockState.events.filter((event) => event.run_id === run.id));
 	}),
 
-	http.post(url("/runs/:id/cancel"), ({ params }) => {
-		const user = mockState.session;
-		if (!user) return unauthenticated();
-		const run = ownRun(user, String(params.id));
+	http.post(url("/runs/:id/cancel"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		const run = ownRun(owner, String(params.id));
 		if (!run) return notFound();
 		if (run.status === "queued" || run.status === "running") {
 			run.status = "cancelled";
 			run.finished_at = now();
 		}
-		return HttpResponse.json(run);
+		return ok(run);
 	}),
 
 	http.get(url("/security/findings"), ({ request }) => {
-		const user = mockState.session;
-		if (!user) return unauthenticated();
+		const owner = caller(request);
+		if (!owner) return unauthorized();
 		const search = new URL(request.url).searchParams;
 		const agentId = search.get("agent_id");
 		const runId = search.get("run_id");
 		const items = mockState.findings.filter(
 			(finding) =>
-				ownAgent(user, finding.agent_id) !== undefined &&
+				ownAgent(owner, finding.agent_id) !== undefined &&
 				(agentId === null || finding.agent_id === agentId) &&
 				(runId === null || finding.run_id === runId),
 		);
-		return HttpResponse.json({ items });
+		return ok(newestFirst(items));
 	}),
 ];

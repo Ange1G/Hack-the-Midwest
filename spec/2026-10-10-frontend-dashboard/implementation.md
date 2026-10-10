@@ -2,8 +2,9 @@
 
 Feature: `spec/2026-10-10-frontend-dashboard/task.md`
 Branch: `feat/frontend-dashboard`
-Status: skeleton complete and revised after backend-owner review; awaiting styling
-pass and alignment with the real API (2026-10-10)
+Status: skeleton complete, revised after backend-owner review, and aligned with the
+backend's API contract; awaiting styling pass and the backend's remaining endpoints
+(2026-10-10)
 
 ## Progress log
 
@@ -24,6 +25,11 @@ pass and alignment with the real API (2026-10-10)
   scan in Playwright, and a check that components use only `:root` variables.
   Root `.gitignore` added; committed artifacts untracked. `main` merged
   (FastAPI agents scaffold).
+- 2026-10-10 18:30: contract aligned with the backend (step 9): envelope, `/api/v1`,
+  `X-Dev-User-SSO` identity, pagination, backend error codes, and the agent's
+  `title` / `system_prompt` / `configurations` fields. Sign-in replaces login and
+  signup. The mock mirrors the implemented endpoint exactly and extends it with
+  the proposed ones. Tests rewritten first, then the code; all green.
 
 ## Decisions made during implementation
 
@@ -92,14 +98,47 @@ navigation bar is styled by the backend owner and is not to be changed.
   via `(--name)` utilities.
 - `app-shell.tsx` was not modified in this round.
 
-## Test results (observed 2026-10-10 17:30, Windows 11, Node 24)
+## Contract alignment (2026-10-10)
+
+Decision: adopt the backend's conventions now and keep the frontend's extra
+endpoints as proposals the mock serves until the backend builds them.
+
+- **Client** (`src/lib/api/client.ts`): adds the `X-Dev-User-SSO` header from the
+  stored identity, unwraps `{ data, error, metadata, pagination }`, maps the
+  envelope's `error` to `ApiError` (including pydantic `details.errors` to
+  per-field messages), treats a 2xx with `data: null` as an error, and offers
+  `api.list` for paginated collections.
+- **Identity** (`src/lib/api/session.ts`): the development SSO id lives in
+  `sessionStorage`. Sign-in verifies it with a one-item `GET /agents/{sso}` using
+  the header before storing it, so a wrong API URL or a down server surfaces on
+  the sign-in form. Sign-out is local; the backend has no session endpoint.
+  Signup was removed: the API has no accounts, and a local stand-in would have
+  been a fake implementation.
+- **Agent shape**: `title`, `system_prompt`, `configurations.tools`,
+  schedule fields, `owner_user_sso`. `flagged` and `last_run` default to `false`
+  and `null` when absent, so the real list endpoint renders today and the mock
+  (and a future backend) can add them. `configurations` that do not match the
+  tools convention render as no tools instead of failing the list.
+- **Credentials** go in a top-level `credentials` array on create, outside
+  `configurations`, so the backend can store them in a secret store rather than
+  the agent's JSON. The mock discards them.
+- **Lists** request one bounded page (`page_size=100`, the backend's maximum) and
+  show "Showing N of M" when more exist. Pagination controls are deferred.
+- **Mock** (`src/mocks/handlers.ts`): same paths, envelope, header check, 401/403
+  behaviour, pagination defaults (20, max 100), and validation error shape as the
+  backend; the proposed endpoints follow the owner-scoped path style
+  (`/agents/{sso}/{id}/runs`). Nothing else in the mock pretends to be real.
+- Visible labels stay "Name" and "Instructions"; only the data fields changed.
+- `app-shell.tsx` changed on one line: it now shows the SSO id instead of an email.
+
+## Test results (observed 2026-10-10 18:30, Windows 11, Node 24)
 
 | Check | Result |
 |---|---|
 | `npm run typecheck` | pass |
-| `npm run check` (Biome, 79 files) | 0 errors, 1 info |
-| `npm test` (Vitest) | 14 files, 62 tests, all pass |
-| `npm run test:e2e` (Playwright, chromium) | 4 tests, all pass: demo flow 15.8 s, redirect, two WCAG AA scans across 7 screens |
+| `npm run check` (Biome, 77 files) | 0 errors, 1 info |
+| `npm test` (Vitest) | 13 files, 66 tests, all pass |
+| `npm run test:e2e` (Playwright, chromium) | 4 tests, all pass: demo flow 15.7 s, redirect, two WCAG AA scans across 6 screens |
 
 Acceptance criteria: AC1 to AC7 all satisfied by the above. AC2, AC3, AC4, AC5 and
 AC6 are exercised directly by `e2e/demo-flow.spec.ts` plus the component suites;
@@ -118,16 +157,13 @@ page component.
 
 ## Known limitations and follow-ups
 
-- **Contract divergence.** The backend scaffold merged from `main`
-  (`spec/2026-10-10-fastapi-agents-scaffold`) defines a different contract from
-  `plan.md`: responses wrapped in `{ data, error, metadata, pagination }`, base
-  path `/api/v1`, development auth via an `X-Dev-User-SSO` header instead of
-  login, `GET /api/v1/agents/{user_sso}` with `page`/`page_size`, and an agent
-  shaped as `title`, `system_prompt`, `configurations`, schedule fields. Only
-  list-agents exists so far. Recommended next step: adopt the envelope, base
-  path, header auth and field names in `schemas.ts`/`client.ts`/`queries.ts`,
-  keep runs and findings on the mock until those endpoints exist. Decision
-  pending with the backend owner.
+- **Backend coverage.** Only `GET /api/v1/agents/{user_sso}` exists on the
+  backend. Against the real API the agents list and sign-in work; creating an
+  agent, agent detail, runs, events, findings, and tool definitions still need
+  the endpoints marked *proposed* in `plan.md`. Until then those screens work in
+  mock mode only.
+- **Proposed endpoints may land differently.** `schemas.ts`, `client.ts`, and
+  `queries.ts` are the only files that should need to change.
 - The global `a` colour in `styles.css` (`--lagoon-deep`) is 3.8:1 on the light
   surfaces; app links override it locally. Raising the token's contrast globally
   is the owner's call.

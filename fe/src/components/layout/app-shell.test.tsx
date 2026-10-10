@@ -4,14 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "#/test/render";
 import { AppShell } from "./app-shell";
 
-const me = {
-	id: "usr_1",
-	email: "angel@example.com",
-	created_at: "2026-10-10T00:00:00Z",
-};
+const me = { user_sso: "angel" };
 
 describe("AppShell", () => {
-	it("shows primary navigation, the signed-in user, and the page body", async () => {
+	it("shows primary navigation, the signed-in identity, and the page body", async () => {
 		renderWithProviders(
 			<AppShell user={me} onLoggedOut={vi.fn()}>
 				<p>Page body</p>
@@ -26,7 +22,7 @@ describe("AppShell", () => {
 		expect(
 			within(nav).getByRole("link", { name: /security/i }),
 		).toHaveAttribute("href", "/security");
-		expect(screen.getByText("angel@example.com")).toBeInTheDocument();
+		expect(screen.getByText("angel")).toBeInTheDocument();
 		expect(screen.getByText("Page body")).toBeInTheDocument();
 	});
 

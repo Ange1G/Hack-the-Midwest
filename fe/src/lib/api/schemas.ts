@@ -1,22 +1,51 @@
 import { z } from "zod";
 
-// Contract v0. See spec/2026-10-10-frontend-dashboard/plan.md. Keep this file the
-// single place that knows the wire shape of the API.
+// Contract v1, aligned with the backend. See
+// spec/2026-10-10-frontend-dashboard/plan.md. Keep this file the single place
+// that knows the wire shape of the API.
 
 const stringRecord = z.record(z.string(), z.string());
 
-export const userSchema = z.object({
-	id: z.string(),
-	email: z.string(),
-	created_at: z.string(),
-});
-export type User = z.infer<typeof userSchema>;
+// Envelope (api/src/app/common/envelope.py)
 
-export const credentialsSchema = z.object({
-	email: z.email("Enter a valid email address"),
-	password: z.string().min(8, "Password must be at least 8 characters"),
+export const apiErrorSchema = z.object({
+	code: z.string(),
+	message: z.string(),
+	details: z.record(z.string(), z.unknown()).nullable().optional(),
 });
-export type Credentials = z.infer<typeof credentialsSchema>;
+export type ApiErrorBody = z.infer<typeof apiErrorSchema>;
+
+export const paginationSchema = z.object({
+	page: z.number().int(),
+	page_size: z.number().int(),
+	total_items: z.number().int(),
+	total_pages: z.number().int(),
+});
+export type Pagination = z.infer<typeof paginationSchema>;
+
+export const metadataSchema = z.object({ request_id: z.string() });
+
+export const envelope = <T extends z.ZodType>(data: T) =>
+	z.object({
+		data: data.nullable(),
+		error: apiErrorSchema.nullable(),
+		metadata: metadataSchema,
+		pagination: paginationSchema.nullable().optional(),
+	});
+
+// Identity (development header auth)
+
+export const signInInputSchema = z.object({
+	user_sso: z
+		.string()
+		.trim()
+		.min(1, "Enter your SSO id")
+		.max(255, "Keep the SSO id under 255 characters")
+		.regex(/^\S+$/, "The SSO id cannot contain spaces"),
+});
+export type SignInInput = z.infer<typeof signInInputSchema>;
+
+// Tools
 
 export const toolKindSchema = z.enum([
 	"http.get",
@@ -43,19 +72,22 @@ export const toolDefinitionSchema = z.object({
 });
 export type ToolDefinition = z.infer<typeof toolDefinitionSchema>;
 
-// Response shape: credentials are never returned, and unknown keys are stripped,
-// so a leaky server response still never reaches the UI.
+// Unknown keys are stripped, so a leaky response never carries credentials
+// into the UI.
 export const toolConfigSchema = z.object({
 	kind: toolKindSchema,
 	config: stringRecord,
 });
 export type ToolConfig = z.infer<typeof toolConfigSchema>;
 
-// Input shape: credentials are write-only.
-export const toolConfigInputSchema = toolConfigSchema.extend({
-	credentials: stringRecord.optional(),
+// Write-only: sent on create, kept out of `configurations`, never returned.
+export const toolCredentialsSchema = z.object({
+	tool: toolKindSchema,
+	values: stringRecord,
 });
-export type ToolConfigInput = z.infer<typeof toolConfigInputSchema>;
+export type ToolCredentials = z.infer<typeof toolCredentialsSchema>;
+
+// Runs
 
 export const runStatusSchema = z.enum([
 	"queued",
@@ -74,27 +106,42 @@ export const runSummarySchema = z.object({
 });
 export type RunSummary = z.infer<typeof runSummarySchema>;
 
+// Agents (AgentRead in the backend)
+
+// `configurations` is untyped JSON on the backend. The frontend's convention is
+// `{ tools: ToolConfig[] }`; anything else renders as an agent with no tools
+// rather than failing the whole list.
+export const agentConfigurationsSchema = z
+	.object({ tools: z.array(toolConfigSchema).catch([]) })
+	.catch({ tools: [] });
+export type AgentConfigurations = z.infer<typeof agentConfigurationsSchema>;
+
 export const agentSchema = z.object({
 	id: z.string(),
-	name: z.string(),
-	instructions: z.string(),
-	tools: z.array(toolConfigSchema),
-	status: z.enum(["active", "disabled"]),
-	flagged: z.boolean(),
-	last_run: runSummarySchema.nullable(),
+	title: z.string(),
+	system_prompt: z.string(),
+	configurations: agentConfigurationsSchema,
+	schedule_month: z.number().int().nullable(),
+	schedule_day: z.number().int().nullable(),
+	schedule_time: z.string().nullable(),
+	owner_user_sso: z.string(),
 	created_at: z.string(),
 	updated_at: z.string(),
+	// Not in the backend yet; defaulted so the real API works today.
+	flagged: z.boolean().default(false),
+	last_run: runSummarySchema.nullable().default(null),
 });
 export type Agent = z.infer<typeof agentSchema>;
 
 export const agentInputSchema = z.object({
-	name: z
+	title: z
 		.string()
 		.trim()
 		.min(1, "Name is required")
-		.max(80, "Keep the name under 80 characters"),
-	instructions: z.string().trim().min(1, "Instructions are required"),
-	tools: z.array(toolConfigInputSchema),
+		.max(255, "Keep the name under 255 characters"),
+	system_prompt: z.string().trim().min(1, "Instructions are required"),
+	configurations: z.object({ tools: z.array(toolConfigSchema) }),
+	credentials: z.array(toolCredentialsSchema).optional(),
 });
 export type AgentInput = z.infer<typeof agentInputSchema>;
 
@@ -132,15 +179,3 @@ export const findingSchema = z.object({
 	created_at: z.string(),
 });
 export type Finding = z.infer<typeof findingSchema>;
-
-export const apiErrorBodySchema = z.object({
-	error: z.object({
-		code: z.string(),
-		message: z.string(),
-		fields: stringRecord.optional(),
-	}),
-});
-export type ApiErrorBody = z.infer<typeof apiErrorBodySchema>;
-
-export const collection = <T extends z.ZodType>(item: T) =>
-	z.object({ items: z.array(item) });

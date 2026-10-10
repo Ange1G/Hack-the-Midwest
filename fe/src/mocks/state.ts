@@ -6,18 +6,14 @@ import type {
 	RunEvent,
 	ToolConfig,
 	ToolDefinition,
-	User,
 } from "#/lib/api/schemas";
 
-// In-memory state behind the mock API. Development and test only.
-
-export type MockUser = User & { password: string };
-export type MockAgent = Agent & { owner_id: string };
+// In-memory state behind the mock API. Development and test only. Identity is
+// whatever the X-Dev-User-SSO header says, exactly like the backend's
+// development auth, so there is no user table.
 
 export type MockState = {
-	session: User | null;
-	users: MockUser[];
-	agents: MockAgent[];
+	agents: Agent[];
 	runs: Run[];
 	events: RunEvent[];
 	findings: Finding[];
@@ -27,8 +23,6 @@ export type MockState = {
 
 function createState(): MockState {
 	return {
-		session: null,
-		users: [],
 		agents: [],
 		runs: [],
 		events: [],
@@ -51,53 +45,6 @@ export function nextId(prefix: string): string {
 
 export function now(): string {
 	return new Date().toISOString();
-}
-
-export function publicUser(user: MockUser): User {
-	return { id: user.id, email: user.email, created_at: user.created_at };
-}
-
-export function publicAgent(agent: MockAgent): Agent {
-	const { owner_id: _ownerId, ...rest } = agent;
-	return rest;
-}
-
-export function createUser(email: string, password: string): MockUser {
-	const user: MockUser = {
-		id: nextId("usr"),
-		email,
-		password,
-		created_at: now(),
-	};
-	mockState.users.push(user);
-	return user;
-}
-
-export function createAgent(owner: User, input: AgentInput): MockAgent {
-	const timestamp = now();
-	const agent: MockAgent = {
-		id: nextId("agt"),
-		owner_id: owner.id,
-		name: input.name,
-		instructions: input.instructions,
-		// Credentials are write-only: accepted on input, never stored on the
-		// record the API returns.
-		tools: input.tools.map(({ kind, config }) => ({ kind, config })),
-		status: "active",
-		flagged: false,
-		last_run: null,
-		created_at: timestamp,
-		updated_at: timestamp,
-	};
-	mockState.agents.push(agent);
-	return agent;
-}
-
-// Drives a run through its whole lifecycle synchronously, for seeding and tests.
-export function runToCompletion(run: Run): void {
-	while (run.status === "queued" || run.status === "running") {
-		advanceRun(run);
-	}
 }
 
 export const toolDefinitions: ToolDefinition[] = [
@@ -146,6 +93,33 @@ export const toolDefinitions: ToolDefinition[] = [
 	},
 ];
 
+export function createAgent(owner_user_sso: string, input: AgentInput): Agent {
+	const timestamp = now();
+	const agent: Agent = {
+		id: nextId("agt"),
+		title: input.title,
+		system_prompt: input.system_prompt,
+		// Credentials are write-only: accepted on input, never stored on the
+		// record the API returns.
+		configurations: {
+			tools: input.configurations.tools.map(({ kind, config }) => ({
+				kind,
+				config,
+			})),
+		},
+		schedule_month: null,
+		schedule_day: null,
+		schedule_time: null,
+		owner_user_sso,
+		created_at: timestamp,
+		updated_at: timestamp,
+		flagged: false,
+		last_run: null,
+	};
+	mockState.agents.push(agent);
+	return agent;
+}
+
 export function pushEvent(
 	run: Run,
 	type: RunEvent["type"],
@@ -164,7 +138,7 @@ export function pushEvent(
 	return event;
 }
 
-function syncLastRun(agent: MockAgent, run: Run): void {
+function syncLastRun(agent: Agent, run: Run): void {
 	agent.last_run = {
 		id: run.id,
 		status: run.status,
@@ -173,7 +147,7 @@ function syncLastRun(agent: MockAgent, run: Run): void {
 	agent.updated_at = now();
 }
 
-export function createRun(agent: MockAgent): Run {
+export function createRun(agent: Agent): Run {
 	const run: Run = {
 		id: nextId("run"),
 		agent_id: agent.id,
@@ -188,6 +162,13 @@ export function createRun(agent: MockAgent): Run {
 	mockState.runs.push(run);
 	syncLastRun(agent, run);
 	return run;
+}
+
+// Drives a run through its whole lifecycle synchronously, for seeding and tests.
+export function runToCompletion(run: Run): void {
+	while (run.status === "queued" || run.status === "running") {
+		advanceRun(run);
+	}
 }
 
 export type Violation = { rule: string; message: string };
@@ -237,7 +218,7 @@ function describeTool(tool: ToolConfig): string {
 	}
 }
 
-function finish(run: Run, agent: MockAgent, output: string): void {
+function finish(run: Run, agent: Agent, output: string): void {
 	run.status = "succeeded";
 	run.output = output;
 	run.finished_at = now();
@@ -245,7 +226,7 @@ function finish(run: Run, agent: MockAgent, output: string): void {
 	syncLastRun(agent, run);
 }
 
-function kill(run: Run, agent: MockAgent, violation: Violation): void {
+function kill(run: Run, agent: Agent, violation: Violation): void {
 	const finding: Finding = {
 		id: nextId("fnd"),
 		run_id: run.id,
@@ -282,14 +263,14 @@ export function advanceRun(run: Run): void {
 	if (run.status === "queued") {
 		run.status = "running";
 		run.started_at = now();
-		pushEvent(run, "log", `Agent "${agent.name}" started`);
+		pushEvent(run, "log", `Agent "${agent.title}" started`);
 		pushEvent(run, "log", "Reading instructions and selecting tools");
 		syncLastRun(agent, run);
 		return;
 	}
 
 	if (tick === 2) {
-		const tool = agent.tools[0];
+		const tool = agent.configurations.tools[0];
 		if (!tool) {
 			finish(run, agent, "No tools configured, so there was nothing to do.");
 			return;
@@ -310,9 +291,10 @@ export function advanceRun(run: Run): void {
 		return;
 	}
 
+	const count = agent.configurations.tools.length;
 	finish(
 		run,
 		agent,
-		`Completed ${agent.tools.length} tool call${agent.tools.length === 1 ? "" : "s"}. Summary: all checks passed, nothing needs attention.`,
+		`Completed ${count} tool call${count === 1 ? "" : "s"}. Summary: all checks passed, nothing needs attention.`,
 	);
 }

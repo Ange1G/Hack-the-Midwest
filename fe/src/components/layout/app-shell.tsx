@@ -3,8 +3,8 @@ import { Bot, ShieldAlert } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "#/components/ui/button";
 import { Separator } from "#/components/ui/separator";
-import { useLogout } from "#/lib/api/queries";
-import type { User } from "#/lib/api/schemas";
+import { useSignOut } from "#/lib/api/queries";
+import type { User } from "#/lib/api/session";
 
 const navItems = [
 	{ to: "/agents", label: "Agents", icon: Bot },
@@ -20,7 +20,7 @@ export function AppShell({
 	onLoggedOut: () => void;
 	children: ReactNode;
 }) {
-	const logout = useLogout();
+	const logout = useSignOut();
 
 	return (
 		<div className="flex min-h-screen">
@@ -49,9 +49,9 @@ export function AppShell({
 					<Separator />
 					<p
 						className="truncate pt-2 text-sm text-muted-foreground"
-						title={user.email}
+						title={user.user_sso}
 					>
-						{user.email}
+						{user.user_sso}
 					</p>
 					<Button
 						type="button"

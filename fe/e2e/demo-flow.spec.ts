@@ -1,15 +1,12 @@
 import { expect, test } from "@playwright/test";
 
 // The judges' walkthrough, end to end, against the mock API.
-test("sign up, build an agent, run it, then watch the monitor kill a rogue one", async ({
+test("sign in, build an agent, run it, then watch the monitor kill a rogue one", async ({
 	page,
 }) => {
-	const email = `judge-${Date.now()}@example.com`;
-
-	await page.goto("/signup");
-	await page.getByLabel("Email", { exact: true }).fill(email);
-	await page.getByLabel("Password", { exact: true }).fill("correct horse battery");
-	await page.getByRole("button", { name: "Create account" }).click();
+	await page.goto("/login");
+	await page.getByLabel("SSO id", { exact: true }).fill(`judge-${Date.now()}`);
+	await page.getByRole("button", { name: "Sign in" }).click();
 
 	await expect(
 		page.getByRole("heading", { name: "Agents", exact: true }),
