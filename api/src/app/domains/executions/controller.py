@@ -29,7 +29,9 @@ class ExecutionsController:
         *,
         caller: CurrentUser,
     ) -> ApiEnvelope[ExecutionRead]:
-        execution = await self._service.enqueue(user_sso, agent_id, caller=caller)
+        execution = await self._service.enqueue(
+            user_sso, agent_id, caller=caller, settings=self._settings
+        )
         return self._item(execution)
 
     async def get(
