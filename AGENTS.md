@@ -70,6 +70,9 @@ Defer nonessential integrations, advanced orchestration, complex scheduling, and
 
 - [x] Scaffold project.
 - [ ] Build the MVP frontend before polishing.
+  - [ ] Build feature-by-feature, starting off with the foundations.
+    - [ ] Build the base layout for a dashboard for users to create agents.
+    - [ ] Build the overall components needed for final product.
 - [ ] Build the MVP API before polishing.
 - [ ] Build the MVP backend and execution infrastructure before polishing.
 - [ ] Implement agent creation and configuration persistence.
