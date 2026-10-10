@@ -48,6 +48,8 @@ class ExecutionRepository(Protocol):
         self, execution_id: uuid.UUID, runner_meta: dict[str, Any]
     ) -> None: ...
 
+    async def count_active_by_owner(self, owner_user_sso: str) -> int: ...
+
 
 class SqlAlchemyExecutionRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -181,6 +183,19 @@ class SqlAlchemyExecutionRepository:
         execution.runner_meta = merged
         execution.updated_at = datetime.now(UTC)
         await self._session.commit()
+
+    async def count_active_by_owner(self, owner_user_sso: str) -> int:
+        total = await self._session.scalar(
+            select(func.count())
+            .select_from(AgentExecution)
+            .where(
+                AgentExecution.owner_user_sso == owner_user_sso,
+                AgentExecution.status.in_(
+                    [ExecutionStatus.QUEUED.value, ExecutionStatus.RUNNING.value]
+                ),
+            )
+        )
+        return int(total or 0)
 
 
 def is_terminal(status: str) -> bool:
