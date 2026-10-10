@@ -1,11 +1,16 @@
 import { Link } from "@tanstack/react-router";
+import { Bot, FileTextIcon } from "lucide-react";
 import { DataTable, type DataTableColumn } from "#/components/data-table";
+import {
+	DataTableActionButton,
+	DataTableActionsCell,
+} from "#/components/data-table-action-button";
 import { EmptyState, ErrorState, LoadingState } from "#/components/states";
 import { type Tone, ToneBadge } from "#/components/tone-badge";
 import { useAgents, useFindings } from "#/lib/api/queries";
 import type { Finding } from "#/lib/api/schemas";
 import { formatDateTime } from "#/lib/format";
-import { textLinkClass } from "#/lib/styles";
+import { tableLinkClass } from "#/lib/styles";
 
 type FindingRow = Finding & { agent_name: string };
 
@@ -59,7 +64,7 @@ const columns: DataTableColumn<FindingRow>[] = [
 			<Link
 				to="/agents/$agentId"
 				params={{ agentId: row.original.agent_id }}
-				className={textLinkClass}
+				className={tableLinkClass}
 			>
 				{row.original.agent_name}
 			</Link>
@@ -87,16 +92,32 @@ const columns: DataTableColumn<FindingRow>[] = [
 	},
 	{
 		id: "actions",
-		header: () => <span className="sr-only">Actions</span>,
+		header: "Actions",
 		enableSorting: false,
+		meta: {
+			headerClassName: "w-[120px] text-right",
+			cellClassName: "text-right",
+		},
 		cell: ({ row }) => (
-			<Link
-				to="/runs/$runId"
-				params={{ runId: row.original.run_id }}
-				className={textLinkClass}
-			>
-				View run
-			</Link>
+			<DataTableActionsCell>
+				<DataTableActionButton
+					label="View agent"
+					icon={<Bot className="size-4" />}
+					asChild
+				>
+					<Link
+						to="/agents/$agentId"
+						params={{ agentId: row.original.agent_id }}
+					/>
+				</DataTableActionButton>
+				<DataTableActionButton
+					label="View run"
+					icon={<FileTextIcon className="size-4" />}
+					asChild
+				>
+					<Link to="/runs/$runId" params={{ runId: row.original.run_id }} />
+				</DataTableActionButton>
+			</DataTableActionsCell>
 		),
 	},
 ];

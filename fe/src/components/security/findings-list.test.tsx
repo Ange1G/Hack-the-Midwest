@@ -35,5 +35,8 @@ describe("FindingsList", () => {
 		expect(
 			within(row).getByRole("link", { name: /view run/i }),
 		).toHaveAttribute("href", `/runs/${run.id}`);
+		expect(
+			within(row).getByRole("link", { name: /view agent/i }),
+		).toHaveAttribute("href", `/agents/${agent.id}`);
 	});
 });
