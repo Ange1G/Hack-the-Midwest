@@ -1,9 +1,11 @@
 import type { HttpMethod } from "#/lib/api/schemas";
 import { cn } from "#/lib/utils";
 
+// Both segments keep dark text: --lagoon-deep on --foam is 3.6:1 at this size,
+// below WCAG AA, so POST is distinguished by its background instead.
 const methodAccent: Record<HttpMethod, string> = {
 	GET: "text-(--sea-ink-soft) bg-(--sand)",
-	POST: "text-(--lagoon-deep) bg-(--foam)",
+	POST: "text-(--sea-ink) bg-(--foam)",
 };
 
 export function HttpCallChip({
