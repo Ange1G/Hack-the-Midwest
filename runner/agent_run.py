@@ -56,11 +56,13 @@ def _text_from_message(message: object) -> str:
     return "".join(parts).strip()
 
 
-def success_body(output: str, model: str) -> dict[str, Any]:
-    return {
-        "status": "succeeded",
-        "result": {"output": output, "model": model},
-    }
+def success_body(
+    output: str, model: str, tool_calls: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    result: dict[str, Any] = {"output": output, "model": model}
+    if tool_calls:
+        result["tool_calls"] = tool_calls
+    return {"status": "succeeded", "result": result}
 
 
 def failure_body(code: str, message: str) -> dict[str, Any]:
@@ -75,7 +77,8 @@ def run_turn(
     manifest: dict[str, Any],
     model_id: str,
     invoke: Callable[[str, str], object],
+    tool_calls: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     prompt = system_prompt_from(manifest)
     result = invoke(prompt, DEFAULT_USER_MESSAGE)
-    return success_body(output_text(result), model_id)
+    return success_body(output_text(result), model_id, tool_calls)
