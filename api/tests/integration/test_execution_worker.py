@@ -20,6 +20,8 @@ class FakeCallbackRunner:
     async def run(self, request: RunRequest) -> RunOutcome:
         assert request.openai_api_key
         assert "sk-" not in request.agent_manifest.get("system_prompt", "")
+        assert request.http_tools == []
+        assert not request.http_credentials
         path = urlparse(request.callback_url).path
         response = await self._client.post(
             path,
