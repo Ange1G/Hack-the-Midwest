@@ -5,7 +5,7 @@ import pytest
 
 from app.core.auth import CurrentUser
 from app.core.config import Settings
-from app.core.exceptions import ForbiddenError, NotFoundError, UnauthorizedError
+from app.core.exceptions import AppError, ForbiddenError, NotFoundError, UnauthorizedError
 from app.domains.agents.models import Agent
 from app.domains.executions.models import AgentExecution, ExecutionStatus
 from app.domains.executions.schemas import ExecutionComplete
@@ -14,6 +14,7 @@ from app.domains.executions.tokens import hash_callback_token
 
 ME = CurrentUser(user_sso="sso-me")
 AGENT_ID = uuid.uuid4()
+SETTINGS = Settings(app_env="test", max_active_executions_per_owner=5)
 
 
 def _agent() -> Agent:
@@ -75,6 +76,14 @@ class FakeExecutions:
         items = [row for row in self.rows.values() if row.owner_user_sso == owner_user_sso]
         return items, len(items)
 
+    async def count_active_by_owner(self, owner_user_sso: str) -> int:
+        return sum(
+            1
+            for row in self.rows.values()
+            if row.owner_user_sso == owner_user_sso
+            and row.status in (ExecutionStatus.QUEUED.value, ExecutionStatus.RUNNING.value)
+        )
+
     async def complete_if_running(
         self,
         execution_id: uuid.UUID,
@@ -99,7 +108,7 @@ class FakeExecutions:
 async def test_enqueue_creates_queued_execution() -> None:
     executions = FakeExecutions()
     result = await ExecutionService(executions, FakeAgents([_agent()])).enqueue(
-        "sso-me", AGENT_ID, caller=ME
+        "sso-me", AGENT_ID, caller=ME, settings=SETTINGS
     )
     assert result.status == "queued"
     assert result.agent_id == AGENT_ID
@@ -110,21 +119,21 @@ async def test_enqueue_creates_queued_execution() -> None:
 async def test_enqueue_forbidden_for_other_user() -> None:
     with pytest.raises(ForbiddenError):
         await ExecutionService(FakeExecutions(), FakeAgents([_agent()])).enqueue(
-            "sso-other", AGENT_ID, caller=ME
+            "sso-other", AGENT_ID, caller=ME, settings=SETTINGS
         )
 
 
 async def test_enqueue_missing_agent_is_not_found() -> None:
     with pytest.raises(NotFoundError):
         await ExecutionService(FakeExecutions(), FakeAgents([])).enqueue(
-            "sso-me", AGENT_ID, caller=ME
+            "sso-me", AGENT_ID, caller=ME, settings=SETTINGS
         )
 
 
 async def test_get_is_tenant_scoped() -> None:
     executions = FakeExecutions()
     service = ExecutionService(executions, FakeAgents([_agent()]))
-    created = await service.enqueue("sso-me", AGENT_ID, caller=ME)
+    created = await service.enqueue("sso-me", AGENT_ID, caller=ME, settings=SETTINGS)
     fetched = await service.get("sso-me", created.id, caller=ME)
     assert fetched.id == created.id
     with pytest.raises(ForbiddenError):
@@ -134,7 +143,7 @@ async def test_get_is_tenant_scoped() -> None:
 async def test_complete_requires_callback_token() -> None:
     executions = FakeExecutions()
     service = ExecutionService(executions, FakeAgents([_agent()]))
-    created = await service.enqueue("sso-me", AGENT_ID, caller=ME)
+    created = await service.enqueue("sso-me", AGENT_ID, caller=ME, settings=SETTINGS)
     row = executions.rows[created.id]
     row.status = ExecutionStatus.RUNNING.value
     row.callback_token_hash = hash_callback_token("secret")
@@ -156,7 +165,7 @@ async def test_complete_requires_callback_token() -> None:
 async def test_complete_is_idempotent_when_already_terminal() -> None:
     executions = FakeExecutions()
     service = ExecutionService(executions, FakeAgents([_agent()]))
-    created = await service.enqueue("sso-me", AGENT_ID, caller=ME)
+    created = await service.enqueue("sso-me", AGENT_ID, caller=ME, settings=SETTINGS)
     row = executions.rows[created.id]
     row.status = ExecutionStatus.SUCCEEDED.value
     row.result = {"message": "already done"}
@@ -174,7 +183,7 @@ async def test_complete_is_idempotent_when_already_terminal() -> None:
 async def test_complete_persists_success() -> None:
     executions = FakeExecutions()
     service = ExecutionService(executions, FakeAgents([_agent()]))
-    created = await service.enqueue("sso-me", AGENT_ID, caller=ME)
+    created = await service.enqueue("sso-me", AGENT_ID, caller=ME, settings=SETTINGS)
     row = executions.rows[created.id]
     row.status = ExecutionStatus.RUNNING.value
     row.callback_token_hash = hash_callback_token("secret")
@@ -191,7 +200,7 @@ async def test_complete_persists_success() -> None:
 async def test_list_clamps_page_size() -> None:
     executions = FakeExecutions()
     service = ExecutionService(executions, FakeAgents([_agent()]))
-    await service.enqueue("sso-me", AGENT_ID, caller=ME)
+    await service.enqueue("sso-me", AGENT_ID, caller=ME, settings=SETTINGS)
     items, total, page, size = await service.list_for_owner(
         "sso-me",
         page=1,
@@ -203,3 +212,14 @@ async def test_list_clamps_page_size() -> None:
     assert page == 1
     assert size == 50
     assert len(items) == 1
+
+
+async def test_enqueue_rejects_when_active_limit_reached() -> None:
+    executions = FakeExecutions()
+    service = ExecutionService(executions, FakeAgents([_agent()]))
+    tight = Settings(app_env="test", max_active_executions_per_owner=1)
+    await service.enqueue("sso-me", AGENT_ID, caller=ME, settings=tight)
+    with pytest.raises(AppError) as exc:
+        await service.enqueue("sso-me", AGENT_ID, caller=ME, settings=tight)
+    assert exc.value.status_code == 429
+    assert exc.value.code == "too_many_executions"
