@@ -14,6 +14,14 @@ from app.domains.executions.service import agent_manifest
 from app.domains.executions.tokens import generate_callback_token, hash_callback_token
 from app.worker.runner import ContainerRunner, RunOutcome, RunRequest
 
+
+def platform_openai_key(settings: Settings) -> str | None:
+    secret = settings.openai_api_key
+    if secret is None:
+        return None
+    value = secret.get_secret_value().strip()
+    return value or None
+
 logger = logging.getLogger(__name__)
 
 CALLBACK_PATH = "/api/v1/internal/executions/{execution_id}/complete"
@@ -37,6 +45,16 @@ async def process_once(
     if claimed is None:
         return False
 
+    openai_key = platform_openai_key(settings)
+    if openai_key is None:
+        await _fail_running(
+            session_factory,
+            claimed.execution_id,
+            error_code="llm_unconfigured",
+            error_message="OPENAI_API_KEY is not configured on the worker",
+        )
+        return True
+
     request = RunRequest(
         execution_id=claimed.execution_id,
         agent_id=claimed.agent_id,
@@ -45,7 +63,9 @@ async def process_once(
         callback_token=claimed.callback_token,
         agent_manifest=claimed.manifest,
         timeout_seconds=settings.execution_timeout_seconds,
-        image=settings.execution_stub_image,
+        image=settings.execution_runner_image,
+        openai_api_key=openai_key,
+        openai_model=settings.openai_model,
     )
     try:
         outcome = await runner.run(request)
@@ -135,6 +155,23 @@ async def _reconcile(
             error_code="callback_missing",
             error_message="Container finished without posting a result",
             runner_meta=outcome.runner_meta,
+        )
+
+
+async def _fail_running(
+    session_factory: async_sessionmaker[AsyncSession],
+    execution_id: uuid.UUID,
+    *,
+    error_code: str,
+    error_message: str,
+) -> None:
+    async with session_factory() as session:
+        executions = SqlAlchemyExecutionRepository(session)
+        await executions.fail_if_running(
+            execution_id,
+            status=ExecutionStatus.FAILED.value,
+            error_code=error_code,
+            error_message=error_message,
         )
 
 
