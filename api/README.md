@@ -175,4 +175,16 @@ The container must reach the API at `EXECUTION_CALLBACK_BASE_URL`
 `--add-host=host.docker.internal:host-gateway` for Linux Docker.
 
 The runner uses AWS Strands Agents with OpenAI (`system_prompt` from the agent record).
-HTTP/MCP tools are not wired yet. See `spec/2026-10-10-strands-openai-runner/`.
+HTTP connectors become Strands tools that call the **stored** method/URL only (the model
+cannot pick a URL). MCP connectors are ignored at run time for now.
+See `spec/2026-10-10-strands-openai-runner/` and `spec/2026-10-10-agent-execution-http-tools/`.
+
+Owners may have at most `MAX_ACTIVE_EXECUTIONS_PER_OWNER` queued or running jobs (default 5).
+
+## Agent flow (copy-paste)
+
+1. Create an HTTP connector (optional credentials encrypted at rest).
+2. Create an agent whose `configurations.primitives` maps that connector id to `{}`.
+3. Enqueue: `POST /api/v1/agents/{sso}/{agentId}/executions` → `202` + execution id.
+4. Poll: `GET /api/v1/agents/{sso}/executions/{executionId}` until `succeeded` or `failed`.
+5. `data.result.output` is the model text; `data.result.tool_calls` lists HTTP tools used.
