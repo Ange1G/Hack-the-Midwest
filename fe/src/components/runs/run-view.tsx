@@ -105,7 +105,7 @@ export function RunView({
 			<Timeline run={data} />
 
 			<div className="mt-6 grid gap-6 lg:grid-cols-2">
-				<Card>
+				<Card className="island-shell">
 					<CardHeader>
 						<CardTitle>Output</CardTitle>
 					</CardHeader>
@@ -119,7 +119,7 @@ export function RunView({
 						)}
 					</CardContent>
 				</Card>
-				<Card>
+				<Card className="island-shell">
 					<CardHeader>
 						<CardTitle>Event log</CardTitle>
 					</CardHeader>

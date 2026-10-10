@@ -208,7 +208,7 @@ function AgentFormFields({
 					const draft = drafts[definition.kind] ?? emptyDraft();
 					const id = `tool-${definition.kind}`;
 					return (
-						<Card key={definition.kind}>
+						<Card key={definition.kind} className="island-shell">
 							<CardHeader className="flex flex-row items-start gap-3 space-y-0">
 								<Checkbox
 									id={id}

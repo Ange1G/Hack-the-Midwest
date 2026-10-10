@@ -87,7 +87,7 @@ export function AgentDetail({
 					<TabsTrigger value="runs">Runs</TabsTrigger>
 				</TabsList>
 				<TabsContent value="overview" className="mt-4 space-y-6">
-					<Card>
+					<Card className="island-shell">
 						<CardHeader>
 							<CardTitle>Instructions</CardTitle>
 						</CardHeader>
@@ -97,7 +97,7 @@ export function AgentDetail({
 							</p>
 						</CardContent>
 					</Card>
-					<Card>
+					<Card className="island-shell">
 						<CardHeader>
 							<CardTitle>Tools</CardTitle>
 						</CardHeader>

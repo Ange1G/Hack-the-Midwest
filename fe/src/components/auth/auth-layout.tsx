@@ -21,7 +21,7 @@ export function AuthLayout({
 }) {
 	return (
 		<main className="flex min-h-screen items-center justify-center p-6">
-			<Card className="w-full max-w-sm">
+			<Card className="island-shell w-full max-w-sm">
 				<CardHeader>
 					<p className="island-kicker">Agent Platform</p>
 					<CardTitle className="display-title text-2xl">{title}</CardTitle>

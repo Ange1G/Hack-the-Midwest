@@ -131,6 +131,25 @@ endpoints as proposals the mock serves until the backend builds them.
 - Visible labels stay "Name" and "Instructions"; only the data fields changed.
 - `app-shell.tsx` changed on one line: it now shows the SSO id instead of an email.
 
+## Palette follow-up (backend owner, 2026-10-10)
+
+Feedback: some backgrounds, such as on the agents page, looked hard-coded rather
+than driven by the `:root` variables in `styles.css`.
+
+- A scan of every `.ts`, `.tsx` and `.css` file under `src` for hex, `rgb()`, or
+  Tailwind palette classes found no literal colour in app code. Every background
+  resolves to a `:root` variable, either a shadcn token mapped by the `@theme`
+  block in `styles.css` or a direct `(--name)` reference.
+- The three literals that did exist were in scaffold shadcn primitives the pages
+  do not use: `text-white` on the destructive button and badge (now
+  `text-destructive-foreground`) and `bg-white` on the slider thumb (now
+  `bg-background`).
+- What likely read as hard-coded was the look: cards used the shadcn `--card`
+  token, which is pure white, while the design language in `styles.css` is the
+  translucent `.island-shell` surface on `--surface` and `--line`. Cards, tables,
+  empty states and loading skeletons now use `.island-shell` (and `--line` for
+  skeleton bars), so the pages take their surfaces from the palette.
+
 ## Test results (observed 2026-10-10 18:30, Windows 11, Node 24)
 
 | Check | Result |

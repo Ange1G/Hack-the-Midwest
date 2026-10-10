@@ -5,11 +5,14 @@ import { Skeleton } from "#/components/ui/skeleton";
 
 export function LoadingState({ label }: { label: string }) {
 	return (
-		<output aria-live="polite" className="block space-y-3">
+		<output
+			aria-live="polite"
+			className="island-shell block space-y-3 rounded-xl p-4"
+		>
 			<p className="text-sm text-muted-foreground">{label}</p>
-			<Skeleton className="h-9 w-2/5" />
-			<Skeleton className="h-9 w-full" />
-			<Skeleton className="h-9 w-4/5" />
+			<Skeleton className="h-9 w-2/5 bg-(--line)" />
+			<Skeleton className="h-9 w-full bg-(--line)" />
+			<Skeleton className="h-9 w-4/5 bg-(--line)" />
 		</output>
 	);
 }
@@ -53,7 +56,7 @@ export function EmptyState({
 	action?: ReactNode;
 }) {
 	return (
-		<div className="rounded-lg border border-dashed p-10 text-center">
+		<div className="island-shell rounded-xl border-dashed p-10 text-center">
 			<h2 className="text-lg font-semibold">{title}</h2>
 			{description ? (
 				<p className="mt-1 text-sm text-muted-foreground">{description}</p>
