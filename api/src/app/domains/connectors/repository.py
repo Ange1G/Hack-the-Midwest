@@ -25,6 +25,10 @@ class ConnectorRepository(Protocol):
         self, owner_user_sso: str, ids: Collection[uuid.UUID]
     ) -> dict[uuid.UUID, str]: ...
 
+    async def owned_with_secrets(
+        self, owner_user_sso: str, ids: Collection[uuid.UUID]
+    ) -> list[tuple[Connector, list[ConnectorSecret]]]: ...
+
 
 class SqlAlchemyConnectorRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -76,3 +80,27 @@ class SqlAlchemyConnectorRepository:
             )
         )
         return {row.id: row.type for row in result}
+
+    async def owned_with_secrets(
+        self, owner_user_sso: str, ids: Collection[uuid.UUID]
+    ) -> list[tuple[Connector, list[ConnectorSecret]]]:
+        """Connectors the owner actually owns, each with its encrypted secret rows."""
+        if not ids:
+            return []
+        result = await self._session.execute(
+            select(Connector).where(
+                Connector.owner_user_sso == owner_user_sso, Connector.id.in_(ids)
+            )
+        )
+        connectors = list(result.scalars().all())
+        if not connectors:
+            return []
+        secret_rows = await self._session.execute(
+            select(ConnectorSecret).where(
+                ConnectorSecret.connector_id.in_([c.id for c in connectors])
+            )
+        )
+        by_connector: dict[uuid.UUID, list[ConnectorSecret]] = {c.id: [] for c in connectors}
+        for secret in secret_rows.scalars().all():
+            by_connector[secret.connector_id].append(secret)
+        return [(connector, by_connector[connector.id]) for connector in connectors]
