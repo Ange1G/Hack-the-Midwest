@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     # Platform-owned OpenAI key injected into the runner. Unset: worker fails the job.
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-4o-mini"
+    max_active_executions_per_owner: int = 5
 
 
 @lru_cache
