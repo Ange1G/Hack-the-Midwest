@@ -18,8 +18,14 @@ class Settings(BaseSettings):
     )
     default_page_size: int = 20
     max_page_size: int = 100
-    # Fernet key for agent credentials. Unset: agents without credentials still work.
+    # Fernet key for connector credentials. Unset: connectors without credentials still work.
     secrets_encryption_key: SecretStr | None = None
+    execution_stub_image: str = "agent-platform-runner:local"
+    # URL of this API as the stub container sees it (Docker Desktop: host.docker.internal).
+    execution_callback_base_url: str = "http://host.docker.internal:8000"
+    execution_timeout_seconds: int = 60
+    worker_poll_interval_seconds: float = 1.0
+    docker_enabled: bool = True
 
 
 @lru_cache

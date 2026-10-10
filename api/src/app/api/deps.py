@@ -10,6 +10,12 @@ from app.domains.agents.repository import SqlAlchemyAgentRepository
 from app.domains.agents.service import AgentService
 from app.core.exceptions import AppError
 from app.core.secrets import SecretCipher
+from app.domains.connectors.controller import ConnectorsController
+from app.domains.connectors.repository import SqlAlchemyConnectorRepository
+from app.domains.connectors.service import ConnectorService
+from app.domains.executions.controller import ExecutionsController
+from app.domains.executions.repository import SqlAlchemyExecutionRepository
+from app.domains.executions.service import ExecutionService
 
 
 async def get_current_user(
@@ -54,3 +60,27 @@ def get_secret_cipher(settings: Settings = Depends(get_settings)) -> SecretCiphe
             message="Credential storage is misconfigured on this server",
             status_code=500,
         ) from None
+
+
+async def get_connector_repository(
+    session: AsyncSession = Depends(get_db),
+) -> SqlAlchemyConnectorRepository:
+    return SqlAlchemyConnectorRepository(session)
+
+
+async def get_connectors_controller(
+    repository: SqlAlchemyConnectorRepository = Depends(get_connector_repository),
+    settings: Settings = Depends(get_settings),
+) -> ConnectorsController:
+    return ConnectorsController(service=ConnectorService(repository), settings=settings)
+
+
+async def get_executions_controller(
+    session: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> ExecutionsController:
+    service = ExecutionService(
+        SqlAlchemyExecutionRepository(session),
+        SqlAlchemyAgentRepository(session),
+    )
+    return ExecutionsController(service=service, settings=settings)

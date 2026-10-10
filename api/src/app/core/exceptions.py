@@ -40,6 +40,15 @@ class UnauthorizedError(AppError):
         )
 
 
+class NotFoundError(AppError):
+    def __init__(self, message: str = "Not found") -> None:
+        super().__init__(
+            code="not_found",
+            message=message,
+            status_code=404,
+        )
+
+
 def _envelope_error(
     code: str,
     message: str,

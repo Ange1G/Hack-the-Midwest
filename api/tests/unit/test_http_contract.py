@@ -1,99 +1,117 @@
+import copy
+
 import pytest
 from pydantic import ValidationError
 
+from app.domains.primitives.base import SECRET_PLACEHOLDER, BaseContract
 from app.domains.primitives.http_contract import HttpContract, HttpMethod
 
 PUBLIC_URL = "https://api.example.com/v1/items"
 
+VALID = {
+    "type": "http",
+    "contractVersion": 1,
+    "name": "list_items",
+    "config": {"method": "GET", "URL": PUBLIC_URL},
+}
 
-def contract(**overrides: object) -> HttpContract:
-    body: dict[str, object] = {"contractVersion": 1, "method": "GET", "URL": PUBLIC_URL}
-    body.update(overrides)
-    return HttpContract.model_validate(body)
+
+def with_changes(path: str, value: object) -> dict[str, object]:
+    """Copy of VALID with one dotted path set (or removed when value is ...)."""
+    body = copy.deepcopy(VALID)
+    target = body
+    *parents, last = path.split(".")
+    for key in parents:
+        target = target.setdefault(key, {})  # type: ignore[assignment]
+    if value is ...:
+        target.pop(last, None)  # type: ignore[union-attr]
+    else:
+        target[last] = value  # type: ignore[index]
+    return body
 
 
-def test_accepts_team_spec_shape() -> None:
+def test_accepts_the_generic_shape() -> None:
     c = HttpContract.model_validate(
         {
+            "type": "http",
             "contractVersion": 1,
-            "method": "POST",
-            "URL": PUBLIC_URL,
-            "payload": {"title": "hello"},
-            "xApiKey": "key-123",
-            "authorizationHeader": "Bearer abc",
+            "name": "create_issue",
+            "description": "Create an issue in the tracker",
             "options": {"retries": 5, "timeout": 2500},
+            "credentials": {"xApiKey": "key-123", "authorizationHeader": "Bearer abc"},
+            "config": {"method": "POST", "URL": PUBLIC_URL, "payload": {"title": "hi"}},
         }
     )
-    assert c.method is HttpMethod.POST
-    assert str(c.url) == PUBLIC_URL
-    assert c.payload == {"title": "hello"}
-    assert c.options is not None
-    assert c.options.retries == 5
-    assert c.options.timeout == 2500
+    assert isinstance(c, BaseContract)
+    assert c.config.method is HttpMethod.POST
+    assert str(c.config.url) == PUBLIC_URL
+    assert c.config.payload == {"title": "hi"}
+    assert c.credentials is not None and c.credentials.x_api_key == "key-123"
+    assert c.options is not None and c.options.retries == 5
 
 
-def test_optional_fields_may_be_omitted_or_null() -> None:
-    c = contract(payload=None, xApiKey=None, authorizationHeader=None, options=None)
-    assert c.payload is None and c.options is None
+def test_optional_sections_may_be_omitted_or_null() -> None:
+    c = HttpContract.model_validate(
+        {**VALID, "description": None, "options": None, "credentials": None}
+    )
+    assert c.options is None and c.credentials is None
 
 
-def test_options_fields_may_be_null() -> None:
-    c = contract(options={"retries": None, "timeout": None})
-    assert c.options is not None
-    assert c.options.retries is None and c.options.timeout is None
+def test_serializes_with_spec_field_names() -> None:
+    body = with_changes("credentials", {"xApiKey": "k"})
+    dumped = HttpContract.model_validate(body).model_dump(
+        mode="json", by_alias=True, exclude_none=True
+    )
+    assert set(dumped) == {"type", "contractVersion", "name", "credentials", "config"}
+    assert set(dumped["config"]) == {"method", "URL"}
+    assert dumped["credentials"] == {"xApiKey": "k"}
 
 
-def test_serializes_with_team_spec_field_names() -> None:
-    dumped = contract(xApiKey="k").model_dump(mode="json", by_alias=True, exclude_none=True)
-    assert set(dumped) == {"contractVersion", "method", "URL", "xApiKey"}
-
-
-def test_lowercase_url_key_is_also_accepted() -> None:
-    c = HttpContract.model_validate({"contractVersion": 1, "method": "GET", "url": PUBLIC_URL})
-    assert str(c.url) == PUBLIC_URL
+def test_credential_fields_are_the_credentials_section() -> None:
+    assert HttpContract.credential_fields() == ("xApiKey", "authorizationHeader")
 
 
 @pytest.mark.parametrize(
-    ("override", "reason"),
+    ("path", "value", "reason"),
     [
-        ({"method": "DELETE"}, "only GET and POST are supported"),
-        ({"method": "get"}, "methods are uppercase"),
-        ({"contractVersion": 2}, "unknown contract version"),
-        ({"options": {"retries": 6}}, "retries max 5"),
-        ({"options": {"retries": -1}}, "retries min 0"),
-        ({"options": {"timeout": 50}}, "timeout min 100 ms"),
-        ({"options": {"timeout": 60_001}}, "timeout max 60,000 ms"),
-        ({"options": {"retry": 1}}, "unknown option"),
-        ({"payload": {"q": 1}}, "GET cannot carry a payload"),
-        ({"headers": {}}, "unknown field"),
-        ({"URL": "ftp://example.com/file"}, "http/https only"),
-        ({"URL": "http://localhost:8000/admin"}, "localhost"),
-        ({"URL": "http://127.0.0.1/"}, "loopback"),
-        ({"URL": "https://10.0.0.5/"}, "private range"),
-        ({"URL": "https://192.168.1.10/"}, "private range"),
-        ({"URL": "https://172.16.0.1/"}, "private range"),
-        ({"URL": "http://169.254.169.254/latest/meta-data"}, "cloud metadata"),
-        ({"URL": "https://[::1]/"}, "IPv6 loopback"),
-        ({"URL": "https://db.internal/"}, "internal name"),
-        ({"URL": "https://printer.local/"}, "mDNS name"),
-        ({"URL": "https://intranet/"}, "single-label name"),
-        ({"xApiKey": "x" * 4097}, "credential too long"),
+        ("type", ..., "type is required"),
+        ("type", "mcp", "wrong type for this contract"),
+        ("contractVersion", ..., "version required"),
+        ("contractVersion", 2, "unknown version"),
+        ("name", ..., "name required"),
+        ("name", "List Items", "name must be identifier-like"),
+        ("name", "1items", "name must start with a letter"),
+        ("description", "d" * 1001, "description max 1000"),
+        ("options", {"retries": 6}, "retries max 5"),
+        ("options", {"timeout": 60_001}, "timeout max 60000 ms"),
+        ("options", {"timeout": 99}, "timeout min 100 ms"),
+        ("options", {"retry": 1}, "unknown option"),
+        ("config", ..., "config required"),
+        ("config.method", "DELETE", "GET/POST only"),
+        ("config.method", "get", "uppercase methods"),
+        ("config.URL", ..., "URL required"),
+        ("config.URL", "ftp://example.com/x", "http/https only"),
+        ("config.URL", "http://localhost:8000", "SSRF: localhost"),
+        ("config.URL", "https://10.0.0.5/", "SSRF: private range"),
+        ("config.URL", "http://169.254.169.254/latest", "SSRF: cloud metadata"),
+        ("config.URL", "https://[::1]/", "SSRF: IPv6 loopback"),
+        ("config.URL", "https://db.internal/", "SSRF: internal name"),
+        ("config.URL", "https://intranet/", "SSRF: single-label name"),
+        ("config.payload", {"q": 1}, "GET cannot carry a payload"),
+        ("config.headers", {}, "unknown config field"),
+        ("credentials", {"password": "x"}, "unknown credential field"),
+        ("credentials", {"xApiKey": ""}, "empty credential"),
+        ("credentials", {"xApiKey": "x" * 4097}, "credential too long"),
+        ("credentials", {"xApiKey": SECRET_PLACEHOLDER}, "placeholder is not a credential"),
+        ("method", "GET", "flat HTTP fields belong in config"),
     ],
 )
-def test_rejects_invalid_contracts(override: dict[str, object], reason: str) -> None:
+def test_rejects_invalid_contracts(path: str, value: object, reason: str) -> None:
     with pytest.raises(ValidationError):
-        contract(**override)
+        HttpContract.model_validate(with_changes(path, value))
 
 
-def test_missing_required_fields_are_rejected() -> None:
+def test_url_error_message_is_readable() -> None:
     with pytest.raises(ValidationError) as exc:
-        HttpContract.model_validate({})
-    missing = {err["loc"][0] for err in exc.value.errors()}
-    assert {"contractVersion", "method", "URL"} <= missing
-
-
-def test_url_errors_carry_a_readable_message() -> None:
-    with pytest.raises(ValidationError) as exc:
-        contract(URL="http://10.0.0.1/")
-    messages = [err["msg"] for err in exc.value.errors()]
-    assert any("not allowed" in m for m in messages)
+        HttpContract.model_validate(with_changes("config.URL", "http://10.0.0.1/"))
+    assert any("not allowed" in err["msg"] for err in exc.value.errors())

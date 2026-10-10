@@ -62,22 +62,58 @@ Ensure PostgreSQL is running and `agent_platform_test` exists, then:
 uv run pytest
 ```
 
-## Agent credentials
+## Connectors
 
-HTTP contracts may carry `xApiKey` and `authorizationHeader`. They are encrypted with
-`SECRETS_ENCRYPTION_KEY`, stored in the `agent_secrets` table, and replaced by `"********"`
-in `configurations`, so API responses never include them.
+Connectors are reusable primitives (an HTTP endpoint, an MCP server) owned by a user.
+Agents reference them by ID, so a credential is configured once and shared.
 
-Generate a key and put it in `.env` (never commit it):
+Every connector follows the generic contract:
+
+```text
+{ type, contractVersion, name, description?, options?: { retries, timeout }, credentials?, config }
+```
+
+| `type` | `credentials` | `config` |
+| --- | --- | --- |
+| `http` | `xApiKey`, `authorizationHeader` | `method` (GET/POST), `URL`, `payload` |
+| `mcp` | `xApiKey`, `authorizationHeader` | `URL`, `transport` (`streamableHttp`) |
+
+List connector types and their JSON Schemas: `GET /api/v1/connector-types`.
+
+Create one:
+
+```bash
+curl -s -X POST -H "X-Dev-User-SSO: sso-user-a" -H "Content-Type: application/json" \
+  "http://localhost:8000/api/v1/connectors/sso-user-a" \
+  -d '{
+    "type": "mcp",
+    "contractVersion": 1,
+    "name": "linear",
+    "description": "Team Linear workspace",
+    "credentials": { "authorizationHeader": "Bearer <token>" },
+    "config": { "URL": "https://mcp.linear.example.com/mcp" }
+  }'
+```
+
+List yours: `GET /api/v1/connectors/sso-user-a?page=1&page_size=20`.
+
+### Credentials
+
+Everything under `credentials` is encrypted with `SECRETS_ENCRYPTION_KEY`, stored in
+`connector_secrets`, and returned as `"********"`. Generate a key and put it in `.env`
+(never commit it):
 
 ```bash
 uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-Without a key, agents without credentials still work; creating one with credentials returns `503`.
-Losing or changing the key makes stored credentials unreadable.
+Without a key, connectors without credentials still work; creating one with credentials
+returns `503`. Losing or changing the key makes stored credentials unreadable.
 
 ## Create an agent
+
+`configurations.primitives` maps your connector IDs to how this agent may use them.
+MCP references must list `allowedTools`; HTTP references must not.
 
 ```bash
 curl -s -X POST -H "X-Dev-User-SSO: sso-user-a" -H "Content-Type: application/json" \
@@ -87,13 +123,7 @@ curl -s -X POST -H "X-Dev-User-SSO: sso-user-a" -H "Content-Type: application/js
     "systemPrompt": "Summarize new issues from the last day.",
     "configurations": {
       "primitives": {
-        "list_issues": {
-          "contractVersion": 1,
-          "method": "GET",
-          "URL": "https://api.github.com/repos/acme/web/issues",
-          "authorizationHeader": "Bearer <token>",
-          "options": { "retries": 3, "timeout": 10000 }
-        }
+        "<linear connector id>": { "allowedTools": ["search_issues", "get_issue"] }
       },
       "dayOfWeek": [1, 2, 3, 4, 5],
       "timeOfDay": [540]
@@ -102,4 +132,43 @@ curl -s -X POST -H "X-Dev-User-SSO: sso-user-a" -H "Content-Type: application/js
 ```
 
 `dayOfWeek`: 0 = Sunday ... 6 = Saturday. `timeOfDay`: minutes after midnight (540 = 09:00).
-Full rules: `spec/2026-10-10-agent-create-http-contract/`.
+A connector that does not exist or belongs to another user is rejected with the same `422`.
+
+Adding a connector type: subclass `BaseContract` in `app/domains/primitives/` and add a
+`ConnectorType` to `registry.CONNECTORS`. Rules and rationale: `spec/2026-10-10-connectors/`.
+
+## Run an agent (local Docker)
+
+Enqueue a run (returns `202` immediately):
+
+```bash
+curl -s -X POST -H "X-Dev-User-SSO: sso-user-a" \
+  "http://localhost:8000/api/v1/agents/sso-user-a/<agent-id>/executions"
+```
+
+Inspect it:
+
+```bash
+curl -s -H "X-Dev-User-SSO: sso-user-a" \
+  "http://localhost:8000/api/v1/agents/sso-user-a/executions/<execution-id>"
+```
+
+History: `GET /api/v1/agents/sso-user-a/executions`.
+
+The API only inserts a `queued` row. A worker claims it, starts a stub container, and the
+container POSTs `/api/v1/internal/executions/{id}/complete` with
+`X-Execution-Callback-Token`. That token is stored hashed; it is not a user SSO header.
+
+### Local loop
+
+1. Postgres: `docker compose up -d`
+2. Build the stub image from the repo root: `docker build -t agent-platform-runner:local runner`
+3. API (from `api/`): `uv run uvicorn app.main:app --app-dir src --reload --host 0.0.0.0 --port 8000`
+4. Worker (from `api/`): `uv run agent-worker`
+
+The container must reach the API at `EXECUTION_CALLBACK_BASE_URL`
+(default `http://host.docker.internal:8000`). The worker always passes
+`--add-host=host.docker.internal:host-gateway` for Linux Docker.
+
+This image is plumbing only: it does not run Strands or call user connectors.
+See `spec/2026-10-10-agent-execution-mvp/`.
