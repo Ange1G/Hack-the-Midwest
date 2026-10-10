@@ -26,6 +26,23 @@ describe("AppShell", () => {
 		expect(screen.getByText("Page body")).toBeInTheDocument();
 	});
 
+	it("marks the active section in the sidebar from the current path", async () => {
+		renderWithProviders(
+			<AppShell user={me} onLoggedOut={vi.fn()}>
+				<p>Page body</p>
+			</AppShell>,
+			{ path: "/agents" },
+		);
+
+		const nav = await screen.findByRole("navigation", { name: /main/i });
+		const agents = within(nav).getByRole("link", { name: /agents/i });
+		expect(agents).toHaveAttribute("data-active", "true");
+		expect(agents).toHaveClass("bg-sidebar-accent");
+
+		const security = within(nav).getByRole("link", { name: /security/i });
+		expect(security.getAttribute("data-active")).not.toBe("true");
+	});
+
 	it("signs out and notifies the caller", async () => {
 		const user = userEvent.setup();
 		const onLoggedOut = vi.fn();
@@ -35,7 +52,14 @@ describe("AppShell", () => {
 			</AppShell>,
 		);
 
-		await user.click(await screen.findByRole("button", { name: /sign out/i }));
+		await user.click(
+			await screen.findByRole("button", {
+				name: /account menu for angel@example.com/i,
+			}),
+		);
+		await user.click(
+			await screen.findByRole("menuitem", { name: /sign out/i }),
+		);
 
 		await waitFor(() => expect(onLoggedOut).toHaveBeenCalled());
 	});

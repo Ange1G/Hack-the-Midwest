@@ -1,25 +1,25 @@
-import { Link } from "@tanstack/react-router";
-import { Bot, ShieldAlert } from "lucide-react";
 import type { ReactNode } from "react";
+<<<<<<< HEAD
 import { Button } from "#/components/ui/button";
 import { Separator } from "#/components/ui/separator";
 import { useSignOut } from "#/lib/api/queries";
 import type { User } from "#/lib/api/session";
-
-const navItems = [
-	{ to: "/agents", label: "Agents", icon: Bot },
-	{ to: "/security", label: "Security", icon: ShieldAlert },
-] as const;
+=======
+import { DashboardSidebar } from "#/components/sidebar/app-sidebar";
+import { SidebarInset, SidebarProvider } from "#/components/ui/sidebar";
+import type { User } from "#/lib/api/schemas";
+>>>>>>> 9e7bb1f (refactor: fix layout styling)
 
 export function AppShell({
-	user,
-	onLoggedOut,
-	children,
+  user,
+  onLoggedOut,
+  children,
 }: {
-	user: User;
-	onLoggedOut: () => void;
-	children: ReactNode;
+  user: User;
+  onLoggedOut: () => void;
+  children: ReactNode;
 }) {
+<<<<<<< HEAD
 	const logout = useSignOut();
 
 	return (
@@ -68,4 +68,16 @@ export function AppShell({
 			<main className="min-w-0 flex-1 p-8">{children}</main>
 		</div>
 	);
+=======
+  return (
+    <SidebarProvider defaultOpen>
+      <div className="flex min-h-screen w-full">
+        <DashboardSidebar onLoggedOut={onLoggedOut} user={user} />
+        <SidebarInset className="min-w-0 flex-1 bg-transparent p-8">
+          {children}
+        </SidebarInset>
+      </div>
+    </SidebarProvider>
+  );
+>>>>>>> 9e7bb1f (refactor: fix layout styling)
 }
