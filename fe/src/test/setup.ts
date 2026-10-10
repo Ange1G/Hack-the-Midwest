@@ -7,52 +7,46 @@ import { resetMockState } from "#/mocks/state";
 
 // jsdom has no ResizeObserver; Radix primitives (Checkbox) expect one to exist.
 class ResizeObserverStub {
-  observe(): void {
-    // No layout in jsdom, nothing to observe.
-  }
-  unobserve(): void {
-    // No layout in jsdom, nothing to observe.
-  }
-  disconnect(): void {
-    // No layout in jsdom, nothing to observe.
-  }
+	observe(): void {
+		// No layout in jsdom, nothing to observe.
+	}
+	unobserve(): void {
+		// No layout in jsdom, nothing to observe.
+	}
+	disconnect(): void {
+		// No layout in jsdom, nothing to observe.
+	}
 }
 globalThis.ResizeObserver ??=
-  ResizeObserverStub as unknown as typeof ResizeObserver;
+	ResizeObserverStub as unknown as typeof ResizeObserver;
 
 // shadcn sidebar uses matchMedia for mobile layout.
 Object.defineProperty(window, "matchMedia", {
-  writable: true,
-  value: (query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    addListener: () => {},
-    removeListener: () => {},
-    dispatchEvent: () => false,
-  }),
+	writable: true,
+	value: (query: string) => ({
+		matches: false,
+		media: query,
+		onchange: null,
+		addEventListener: () => {},
+		removeEventListener: () => {},
+		addListener: () => {},
+		removeListener: () => {},
+		dispatchEvent: () => false,
+	}),
 });
 
 beforeAll(() => {
-  server.listen({ onUnhandledRequest: "error" });
+	server.listen({ onUnhandledRequest: "error" });
 });
 
 afterEach(() => {
-<<<<<<< HEAD
 	server.resetHandlers();
 	server.events.removeAllListeners();
 	resetMockState();
 	clearSessionUser();
 	cleanup();
-=======
-  server.resetHandlers();
-  resetMockState();
-  cleanup();
->>>>>>> c98b9b5 (refactor: scaffold test initalization)
 });
 
 afterAll(() => {
-  server.close();
+	server.close();
 });

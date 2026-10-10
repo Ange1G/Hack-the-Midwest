@@ -54,7 +54,7 @@ describe("AppShell", () => {
 
 		await user.click(
 			await screen.findByRole("button", {
-				name: /account menu for angel@example.com/i,
+				name: /account menu for angel/i,
 			}),
 		);
 		await user.click(
