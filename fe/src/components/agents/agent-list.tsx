@@ -87,7 +87,7 @@ export function AgentList() {
 	const agents = useAgents();
 
 	if (agents.isPending) {
-		return <LoadingState label="Loading agents…" />;
+		return <LoadingState label="Loading agents…" layout="table" />;
 	}
 
 	if (agents.isError) {

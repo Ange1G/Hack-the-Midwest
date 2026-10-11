@@ -59,16 +59,23 @@ describe("theme", () => {
 
 	it("reveals the new theme with a circle growing from the toggle", async () => {
 		const ready = Promise.resolve();
+		const finished = Promise.resolve();
 		const start = vi.fn((update: () => void) => {
 			update();
-			return { ready };
+			return { ready, finished };
 		});
 		Object.assign(document, { startViewTransition: start });
 		const animate = vi.fn();
 		Object.assign(root(), { animate });
 
 		expect(toggleTheme({ x: 10, y: 20 })).toBe("dark");
+		// Only the root takes part while the circle grows: the page area's own
+		// transition is switched off through this class (styles.css).
+		expect(root()).toHaveClass("theme-switching");
 		await ready;
+		await finished;
+		await Promise.resolve();
+		expect(root()).not.toHaveClass("theme-switching");
 
 		expect(start).toHaveBeenCalledOnce();
 		expect(root()).toHaveClass("dark");
@@ -98,5 +105,6 @@ describe("theme", () => {
 
 		expect(start).not.toHaveBeenCalled();
 		expect(root()).toHaveClass("dark");
+		expect(root()).not.toHaveClass("theme-switching");
 	});
 });

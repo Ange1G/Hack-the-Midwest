@@ -18,7 +18,10 @@ describe("AgentList", () => {
 		server.use(http.get(agentsUrl, () => delay("infinite")));
 		renderWithProviders(<AgentList />);
 
-		expect(await screen.findByRole("status")).toHaveTextContent(/loading/i);
+		const status = await screen.findByRole("status");
+		expect(status).toHaveTextContent(/loading/i);
+		// A sketch of the table, so the layout does not jump when data arrives.
+		expect(status).toHaveAttribute("data-layout", "table");
 	});
 
 	it("shows an empty state with a link to create the first agent", async () => {

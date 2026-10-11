@@ -37,6 +37,12 @@ describe("AgentDetail", () => {
 			<AgentDetail agentId={agent.id} onRunStarted={vi.fn()} />,
 		);
 
+		// Loads behind a sketch of the detail page: header, tabs, cards.
+		expect(await screen.findByRole("status")).toHaveAttribute(
+			"data-layout",
+			"detail",
+		);
+
 		expect(
 			await screen.findByRole("heading", { name: "Uptime checker" }),
 		).toBeInTheDocument();

@@ -56,7 +56,7 @@ export function AgentDetail({
 	const startRun = useStartRun(agentId);
 
 	if (agent.isPending) {
-		return <LoadingState label="Loading agent…" />;
+		return <LoadingState label="Loading agent…" layout="detail" />;
 	}
 	if (agent.isError) {
 		return (
@@ -318,7 +318,7 @@ function AgentRuns({ agentId }: { agentId: string }) {
 	const runs = useAgentRuns(agentId);
 
 	if (runs.isPending) {
-		return <LoadingState label="Loading runs…" />;
+		return <LoadingState label="Loading runs…" layout="table" />;
 	}
 	if (runs.isError) {
 		return (

@@ -50,7 +50,7 @@ export function RunView({
 	}, [agentId, status, queryClient]);
 
 	if (run.isPending) {
-		return <LoadingState label="Loading run…" />;
+		return <LoadingState label="Loading run…" layout="run" />;
 	}
 	if (run.isError) {
 		return (

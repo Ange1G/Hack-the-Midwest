@@ -29,6 +29,9 @@ export function getRouter() {
 		routeTree,
 		context: { queryClient },
 		scrollRestoration: true,
+		// Route changes animate the page area (styles.css, .page-view); the
+		// router skips this where the browser has no View Transitions API.
+		defaultViewTransition: true,
 		defaultPreload: "intent",
 		defaultPreloadStaleTime: 0,
 		Wrap: ({ children }) => (

@@ -14,6 +14,12 @@ describe("RunView", () => {
 
 		renderWithProviders(<RunView runId={run.id} pollIntervalMs={5} />);
 
+		// Loads behind a sketch of the run page: header, timeline, two panels.
+		expect(await screen.findByRole("status")).toHaveAttribute(
+			"data-layout",
+			"run",
+		);
+
 		expect(
 			await screen.findByText(/succeeded/i, {}, { timeout: 4000 }),
 		).toBeInTheDocument();

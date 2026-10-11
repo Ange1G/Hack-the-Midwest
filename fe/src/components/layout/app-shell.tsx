@@ -14,7 +14,7 @@ export function AppShell({
 		<SidebarProvider defaultOpen>
 			<div className="flex min-h-screen w-full">
 				<DashboardSidebar user={user} />
-				<SidebarInset className="min-w-0 flex-1 bg-transparent p-8">
+				<SidebarInset className="page-view min-w-0 flex-1 bg-transparent p-8">
 					{children}
 				</SidebarInset>
 			</div>

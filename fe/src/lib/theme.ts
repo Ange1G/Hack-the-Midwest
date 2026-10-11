@@ -64,7 +64,10 @@ export function useTheme(): Theme {
 }
 
 type ViewTransitionDocument = Document & {
-	startViewTransition(update: () => void): { ready: Promise<void> };
+	startViewTransition(update: () => void): {
+		ready: Promise<void>;
+		finished: Promise<void>;
+	};
 };
 
 // Switches theme. Where the browser supports view transitions and the person
@@ -87,7 +90,14 @@ export function toggleTheme(origin?: { x: number; y: number }): Theme {
 		Math.max(x, window.innerWidth - x),
 		Math.max(y, window.innerHeight - y),
 	);
+	// Only the root takes part: styles.css drops the page area's own
+	// view-transition-name while this class is present, so the circle reveals
+	// the whole screen at once instead of leaving the content out.
+	const root = document.documentElement;
+	root.classList.add("theme-switching");
 	const transition = doc.startViewTransition(() => setTheme(next));
+	const settle = () => root.classList.remove("theme-switching");
+	transition.finished.then(settle, settle);
 	transition.ready.then(
 		() => {
 			document.documentElement.animate(

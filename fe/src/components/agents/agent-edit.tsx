@@ -10,7 +10,7 @@ export function AgentEdit({ agentId }: { agentId: string }) {
 	const agent = useAgent(agentId);
 
 	if (agent.isPending) {
-		return <LoadingState label="Loading agent…" />;
+		return <LoadingState label="Loading agent…" layout="form" />;
 	}
 	if (agent.isError) {
 		return (
