@@ -17,7 +17,7 @@ describe("seedDemoState", () => {
 		seedDemoState();
 
 		const statuses = mockState.runs.map((run) => run.status);
-		expect(statuses).toEqual(expect.arrayContaining(["succeeded", "killed"]));
+		expect(statuses).toEqual(expect.arrayContaining(["succeeded", "failed"]));
 		expect(mockState.findings).toHaveLength(1);
 		expect(mockState.agents.some((agent) => agent.flagged)).toBe(true);
 	});

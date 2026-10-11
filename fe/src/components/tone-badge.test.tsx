@@ -17,8 +17,8 @@ describe("ToneBadge", () => {
 
 describe("StatusBadge", () => {
 	it("maps run statuses to readable labels", () => {
-		render(<StatusBadge status="killed" />);
-		expect(screen.getByText("Killed")).toBeInTheDocument();
+		render(<StatusBadge status="timed_out" />);
+		expect(screen.getByText("Timed out")).toBeInTheDocument();
 	});
 
 	it("shows succeeded for a completed run", () => {

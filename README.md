@@ -21,8 +21,8 @@ The platform provides agent orchestration, reusable tools, integrations, distrib
 ### High-level system
 
 ```text
-                        Web Application (planned)
-                     React / TanStack / shadcn
+                     Web dashboard (`fe/`)
+              React, TanStack Router/Query, shadcn/ui
                                |
                                v
                          FastAPI API  ←── internal callback ──┐
@@ -54,7 +54,7 @@ The platform provides agent orchestration, reusable tools, integrations, distrib
 
 | Component | Technology |
 |---|---|
-| Frontend | React, TypeScript, TanStack, shadcn/ui (planned) |
+| Frontend | React, TypeScript, TanStack Router/Query/Form, shadcn/ui (`fe/`) |
 | API | Python 3.14+, FastAPI, Pydantic, SQLAlchemy, Alembic |
 | Agent framework | AWS Strands Agents |
 | LLM provider | OpenAI (platform-owned key; `gpt-4o-mini` default) |
@@ -81,6 +81,10 @@ The production message broker, container scheduling strategy, and authentication
 │   ├── tests/integration/
 │   ├── .env.example
 │   └── docker-compose.yml
+├── fe/                        # Dashboard (agents, runs, mock mode for local UX)
+│   ├── src/lib/api/           # API client, Zod schemas, React Query hooks
+│   ├── src/components/        # Agent builder, list, run view
+│   └── README.md              # Frontend runbook (dev, mock, tests)
 ├── runner/                    # Docker image for isolated agent execution
 │   ├── Dockerfile
 │   ├── entrypoint.py
@@ -93,7 +97,8 @@ The production message broker, container scheduling strategy, and authentication
     ├── 2026-10-10-agent-execution-mvp/
     ├── 2026-10-10-strands-openai-runner/
     ├── 2026-10-10-agent-execution-http-tools/
-    └── 2026-10-10-ssl-ca-bundle/
+    ├── 2026-10-10-ssl-ca-bundle/
+    └── 2026-10-10-frontend-backend-integration/
 ```
 
 ## API overview
@@ -126,11 +131,39 @@ Execution status lifecycle: `queued` → `running` → `succeeded` | `failed` | 
 
 ## Getting started (local development)
 
+Run the **database**, **API**, **worker**, and **frontend** together for the full create-agent → run → view-results loop. You can also use the frontend in **mock mode** without the API (`fe/README.md`).
+
 ### Prerequisites
 
 - Python 3.14+, [uv](https://docs.astral.sh/uv/)
-- Docker (for PostgreSQL and runner containers)
-- An OpenAI API key
+- Node.js 22+ and npm (for `fe/`)
+- Docker (for PostgreSQL and runner execution containers)
+- An OpenAI API key (for real agent runs)
+
+### Quick reference (four terminals)
+
+| Terminal | Directory | Command |
+|----------|-------------|---------|
+| 1 — Postgres | `api/` | `docker compose up -d` |
+| 2 — API | `api/` | `uv run uvicorn app.main:app --app-dir src --reload --host 0.0.0.0 --port 8000` |
+| 3 — Worker | `api/` | `uv run agent-worker` |
+| 4 — Dashboard | `fe/` | `npm install && npm run dev` |
+
+Then open `http://localhost:3000`, sign in with any SSO id (for example `dev-user`). The browser sends `X-Dev-User-SSO` on every API call; it must match `{user_sso}` in the URL path.
+
+Build the runner image once (from repo root):
+
+```bash
+docker build -t agent-platform-runner:local runner
+```
+
+Frontend-only with mocks (no API/worker):
+
+```bash
+cd fe && npm install && npm run dev:mock
+```
+
+Subsystem runbooks: [api/README.md](api/README.md) (connectors, curl examples, worker loop), [fe/README.md](fe/README.md) (scripts, tests).
 
 ### 1. Clone and configure
 
@@ -179,11 +212,22 @@ cd api && uv run uvicorn app.main:app --app-dir src --reload --host 0.0.0.0 --po
 cd api && uv run agent-worker
 ```
 
-### 7. Run tests
+### 7. Start the dashboard
 
 ```bash
-cd api && uv run pytest tests/unit         # 141 unit tests (no Postgres required)
+cd fe
+npm install
+npm run dev
+```
+
+`VITE_API_URL` defaults to `http://localhost:8000/api/v1`. In development the API allows CORS from `http://localhost:3000` when `CORS_ORIGINS` is unset (`api/.env.example`).
+
+### 8. Run tests
+
+```bash
+cd api && uv run pytest tests/unit         # unit tests (no Postgres required)
 cd api && uv run pytest                    # full suite (requires Compose Postgres)
+cd fe && npm test && npm run typecheck
 ```
 
 ### TLS interception (corporate networks / Zscaler / Netskope)
@@ -287,9 +331,11 @@ The backend MVP is complete and end-to-end verified:
 - [x] Per-owner active execution limit (429)
 - [x] Execution status, results, error codes, and history endpoints
 - [x] SSL CA bundle support for TLS-intercepting dev environments
-- [x] 141 unit tests passing
+- [x] Unit and integration tests for the API and worker
+- [x] Dashboard merged on `agent-flow`: sign-in, create agent (HTTP primitives → connectors), enqueue execution, poll results (`result.output`, errors, `timed_out`)
+- [x] CORS for local dashboard ↔ API (`CORS_ORIGINS` / dev defaults)
 
-**Next:** Frontend dashboard, production authentication, MCP tool execution, egress controls, and CI integration tests.
+**Next:** Production authentication, security findings API and UI, MCP tool execution in the runner, egress controls, and CI for the full stack.
 
 ## License
 

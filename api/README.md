@@ -49,6 +49,16 @@ X-Dev-User-SSO: your-sso-id
 
 The path `{user_sso}` must match the header or the API returns `403`.
 
+## CORS (dashboard dev server)
+
+The frontend dev server (`http://localhost:3000` by default) calls this API on a
+different origin and sends `X-Dev-User-SSO`. Browsers require CORS preflight
+(`OPTIONS`) to succeed before those requests run.
+
+When `APP_ENV` is `development` or `test`, allowed origins default to the local
+dashboard ports if `CORS_ORIGINS` is unset. In `production`, set `CORS_ORIGINS`
+to a comma-separated list of frontend origins (CORS is disabled when empty).
+
 ## Example request
 
 ```bash

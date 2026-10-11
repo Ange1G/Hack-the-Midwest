@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import APIRouter, Depends, Query
 
 from app.core.auth import CurrentUser
@@ -31,6 +33,16 @@ async def list_agents_by_user_sso(
         page_size=resolved_page_size,
         caller=caller,
     )
+
+
+@router.get("/{user_sso}/{agent_id}")
+async def get_agent(
+    user_sso: str,
+    agent_id: uuid.UUID,
+    controller: AgentsController = Depends(get_agents_controller),
+    caller: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope[AgentRead]:
+    return await controller.get(user_sso, agent_id, caller=caller)
 
 
 @router.post("/{user_sso}", status_code=status.HTTP_201_CREATED)

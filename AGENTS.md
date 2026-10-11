@@ -84,10 +84,11 @@ Defer nonessential integrations, advanced orchestration, complex scheduling, and
 - [x] Implement asynchronous task submission and worker execution.
 - [x] Implement task status, results, error handling, and execution history.
 - [x] Implement baseline execution limits and security controls.
-- [ ] Build the MVP frontend before polishing.
-  - [ ] Build feature-by-feature, starting off with the foundations.
-    - [ ] Build the base layout for a dashboard for users to create agents.
-    - [ ] Build the overall components needed for final product.
+- [x] Build the MVP frontend before polishing (dashboard on `fe/`; wired to executions and connectors API).
+  - [x] Base layout: sign-in, agents list, agent detail, run view.
+  - [x] Create agent with HTTP primitives (UI creates connectors, then agent with UUID references).
+  - [x] Start execution and poll `/executions` for status, `result.output`, and errors.
+  - [ ] Agent edit/save, production auth, and security findings UI (stub only).
 - [ ] Implement authentication and user-level resource isolation.
 - [ ] Implement background monitoring and policy-violation reporting.
 - [ ] Add end-to-end tests for the primary user workflow.

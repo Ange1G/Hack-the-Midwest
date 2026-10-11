@@ -79,6 +79,21 @@ async def test_created_agent_is_listed(client: AsyncClient) -> None:
     assert created.json()["data"]["id"] in [a["id"] for a in listed.json()["data"]]
 
 
+async def test_get_agent_by_id(client: AsyncClient) -> None:
+    created = await client.post(AGENTS_URL, json=agent_body({}), headers=AUTH)
+    agent_id = created.json()["data"]["id"]
+    response = await client.get(f"{AGENTS_URL}/{agent_id}", headers=AUTH)
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["id"] == agent_id
+
+
+async def test_get_agent_missing_is_404(client: AsyncClient) -> None:
+    missing = uuid.uuid4()
+    response = await client.get(f"{AGENTS_URL}/{missing}", headers=AUTH)
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
+
+
 async def test_agent_without_connectors_is_allowed(client: AsyncClient) -> None:
     response = await client.post(AGENTS_URL, json=agent_body({}), headers=AUTH)
     assert response.status_code == 201

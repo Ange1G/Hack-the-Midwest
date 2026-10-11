@@ -2,6 +2,8 @@ import type {
 	Agent,
 	AgentConfigurations,
 	AgentInput,
+	Connector,
+	ConnectorCreate,
 	Finding,
 	HttpContract,
 	HttpOptions,
@@ -9,17 +11,18 @@ import type {
 	RunEvent,
 } from "#/lib/api/schemas";
 import {
+	connectorCreateFromHttpCall,
+	httpContractFromConnector,
+} from "#/lib/api/schemas";
+import {
 	CONTRACT_VERSION,
 	SECRET_PLACEHOLDER,
 	untrustedDestinationReason,
 } from "#/lib/http-contract";
 
-// In-memory state behind the mock API. Development and test only. Identity is
-// whatever the X-Dev-User-SSO header says, exactly like the backend's
-// development auth, so there is no user table.
-
 export type MockState = {
 	agents: Agent[];
+	connectors: Connector[];
 	runs: Run[];
 	events: RunEvent[];
 	findings: Finding[];
@@ -30,6 +33,7 @@ export type MockState = {
 function createState(): MockState {
 	return {
 		agents: [],
+		connectors: [],
 		runs: [],
 		events: [],
 		findings: [],
@@ -64,32 +68,64 @@ function compactOptions(options: HttpOptions | undefined): HttpOptions | null {
 	return Object.keys(compact).length > 0 ? compact : null;
 }
 
-// Stores a contract the way the backend does: credentials replaced by the
-// placeholder (the real server encrypts them into a separate table) and unset
-// fields omitted.
-function storedContract(
-	contract: AgentInput["configurations"]["primitives"][string],
-): HttpContract {
-	const options = compactOptions(contract.options);
+function storedHttpContract(body: ConnectorCreate): Connector["contract"] {
+	const credentials: Record<string, string> = {};
+	if (body.credentials?.xApiKey) credentials.xApiKey = SECRET_PLACEHOLDER;
+	if (body.credentials?.authorizationHeader) {
+		credentials.authorizationHeader = SECRET_PLACEHOLDER;
+	}
+	const options = compactOptions(body.options ?? undefined);
 	return {
+		type: "http",
 		contractVersion: CONTRACT_VERSION,
-		method: contract.method,
-		URL: contract.URL,
-		...(contract.payload !== undefined ? { payload: contract.payload } : {}),
-		...(contract.xApiKey ? { xApiKey: SECRET_PLACEHOLDER } : {}),
-		...(contract.authorizationHeader
-			? { authorizationHeader: SECRET_PLACEHOLDER }
-			: {}),
+		name: body.name,
+		config: {
+			method: body.config.method,
+			URL: body.config.URL,
+			...(body.config.payload !== undefined
+				? { payload: body.config.payload }
+				: {}),
+		},
+		...(Object.keys(credentials).length > 0 ? { credentials } : {}),
 		...(options ? { options } : {}),
 	};
 }
 
+export function createConnector(
+	owner_user_sso: string,
+	body: ConnectorCreate,
+): Connector {
+	if (mockState.connectors.some((item) => item.owner_user_sso === owner_user_sso && item.name === body.name)) {
+		const error = new Error("connector_name_taken") as Error & {
+			code: string;
+		};
+		error.code = "connector_name_taken";
+		throw error;
+	}
+	const timestamp = now();
+	const connector: Connector = {
+		id: nextId("con"),
+		owner_user_sso,
+		type: body.type,
+		name: body.name,
+		contract: storedHttpContract(body),
+		created_at: timestamp,
+		updated_at: timestamp,
+	};
+	mockState.connectors.push(connector);
+	return connector;
+}
+
 export function createAgent(owner_user_sso: string, input: AgentInput): Agent {
-	const primitives: Record<string, HttpContract> = {};
+	const primitives: AgentConfigurations["primitives"] = {};
 	for (const [name, contract] of Object.entries(
 		input.configurations.primitives,
 	)) {
-		primitives[name] = storedContract(contract);
+		const connector = createConnector(
+			owner_user_sso,
+			connectorCreateFromHttpCall(name, contract),
+		);
+		primitives[connector.id] = {};
 	}
 	const configurations: AgentConfigurations = {
 		primitives,
@@ -116,6 +152,22 @@ export function createAgent(owner_user_sso: string, input: AgentInput): Agent {
 	};
 	mockState.agents.push(agent);
 	return agent;
+}
+
+export function httpCallsForAgent(
+	agent: Agent,
+): Array<{ id: string; name: string; contract: HttpContract }> {
+	const calls: Array<{ id: string; name: string; contract: HttpContract }> = [];
+	for (const id of Object.keys(agent.configurations.primitives)) {
+		const connector = mockState.connectors.find(
+			(item) => item.id === id && item.owner_user_sso === agent.owner_user_sso,
+		);
+		if (!connector) continue;
+		const contract = httpContractFromConnector(connector);
+		if (!contract) continue;
+		calls.push({ id, name: connector.name, contract });
+	}
+	return calls;
 }
 
 export function pushEvent(
@@ -146,14 +198,18 @@ function syncLastRun(agent: Agent, run: Run): void {
 }
 
 export function createRun(agent: Agent): Run {
+	const timestamp = now();
 	const run: Run = {
 		id: nextId("run"),
 		agent_id: agent.id,
+		owner_user_sso: agent.owner_user_sso,
 		status: "queued",
-		output: null,
-		error: null,
-		finding_id: null,
-		created_at: now(),
+		result: null,
+		error_code: null,
+		error_message: null,
+		runner_meta: null,
+		created_at: timestamp,
+		updated_at: timestamp,
 		started_at: null,
 		finished_at: null,
 	};
@@ -162,7 +218,6 @@ export function createRun(agent: Agent): Run {
 	return run;
 }
 
-// Drives a run through its whole lifecycle synchronously, for seeding and tests.
 export function runToCompletion(run: Run): void {
 	while (run.status === "queued" || run.status === "running") {
 		advanceRun(run);
@@ -171,38 +226,35 @@ export function runToCompletion(run: Run): void {
 
 function finish(run: Run, agent: Agent, output: string): void {
 	run.status = "succeeded";
-	run.output = output;
+	run.result = { output, model: "mock" };
 	run.finished_at = now();
+	run.updated_at = run.finished_at;
 	pushEvent(run, "log", "Run finished");
 	syncLastRun(agent, run);
 }
 
-function kill(run: Run, agent: Agent, rule: string, message: string): void {
+function failRun(run: Run, agent: Agent, message: string): void {
 	const finding: Finding = {
 		id: nextId("fnd"),
 		run_id: run.id,
 		agent_id: agent.id,
 		severity: "critical",
-		rule,
+		rule: "exfiltration.untrusted_destination",
 		message,
 		action: "killed",
 		created_at: now(),
 	};
 	mockState.findings.push(finding);
-	pushEvent(run, "security", message, { rule, finding_id: finding.id });
-	run.status = "killed";
-	run.error = "Terminated by the security monitor";
-	run.finding_id = finding.id;
+	pushEvent(run, "security", message, { rule: finding.rule, finding_id: finding.id });
+	run.status = "failed";
+	run.error_code = "policy_violation";
+	run.error_message = `Terminated by the security monitor: ${message}`;
 	run.finished_at = now();
+	run.updated_at = run.finished_at;
 	agent.flagged = true;
 	syncLastRun(agent, run);
 }
 
-// Advances a run one step each time it is read, so a polling client sees
-// queued, running, and then a terminal state without any wall-clock timers.
-// The monitor rule is deterministic, mirroring the constitution's requirement
-// that critical controls do not depend on an LLM's judgement: unsafe URLs are
-// already refused at save time, so the run-time check watches where data goes.
 export function advanceRun(run: Run): void {
 	if (run.status !== "queued" && run.status !== "running") return;
 	const agent = mockState.agents.find((item) => item.id === run.agent_id);
@@ -214,13 +266,14 @@ export function advanceRun(run: Run): void {
 	if (run.status === "queued") {
 		run.status = "running";
 		run.started_at = now();
+		run.updated_at = run.started_at;
 		pushEvent(run, "log", `Agent "${agent.title}" started`);
 		pushEvent(run, "log", "Reading instructions and selecting HTTP calls");
 		syncLastRun(agent, run);
 		return;
 	}
 
-	const calls = Object.entries(agent.configurations.primitives);
+	const calls = httpCallsForAgent(agent);
 	if (tick === 2) {
 		const first = calls[0];
 		if (!first) {
@@ -231,16 +284,22 @@ export function advanceRun(run: Run): void {
 			);
 			return;
 		}
-		const [name, contract] = first;
+		const { name, contract } = first;
 		pushEvent(run, "tool_call", `${contract.method} ${contract.URL}`, {
 			primitive: name,
 			method: contract.method,
 		});
 		const reason = untrustedDestinationReason(contract.URL);
 		if (reason) {
-			kill(run, agent, "exfiltration.untrusted_destination", reason);
+			failRun(run, agent, reason);
 			return;
 		}
+		run.result = {
+			output: null,
+			tool_calls: [
+				{ name, method: contract.method, URL: contract.URL, status: 200 },
+			],
+		};
 		pushEvent(run, "tool_result", `${name} returned 200 OK`, {
 			status: 200,
 			bytes: 1284,

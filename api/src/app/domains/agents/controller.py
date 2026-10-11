@@ -1,3 +1,5 @@
+import uuid
+
 from app.core.auth import CurrentUser
 from app.common.envelope import ApiEnvelope, ApiMetadata, Pagination
 from app.common.pagination import total_pages as compute_total_pages
@@ -45,6 +47,21 @@ class AgentsController:
                 total_items=total_items,
                 total_pages=compute_total_pages(total_items, resolved_page_size),
             ),
+        )
+
+    async def get(
+        self,
+        user_sso: str,
+        agent_id: uuid.UUID,
+        *,
+        caller: CurrentUser,
+    ) -> ApiEnvelope[AgentRead]:
+        agent = await self._service.get_agent(user_sso, agent_id, caller=caller)
+        return ApiEnvelope[AgentRead](
+            data=agent,
+            error=None,
+            metadata=ApiMetadata(request_id=request_id_ctx.get()),
+            pagination=None,
         )
 
     async def create(

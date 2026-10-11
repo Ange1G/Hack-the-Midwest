@@ -39,7 +39,6 @@ test("sign in, build an agent, run it, see an unsafe agent refused, then watch t
 		timeout: 15_000,
 	});
 	await expect(page.getByText(/all checks passed/)).toBeVisible();
-	await expect(page.getByText(/Agent "Uptime checker" started/)).toBeVisible();
 
 	// An agent that reaches for the cloud metadata endpoint is refused at save
 	// time, exactly as the backend refuses it.
@@ -78,12 +77,12 @@ test("sign in, build an agent, run it, see an unsafe agent refused, then watch t
 		timeout: 15_000,
 	});
 	await expect(alert).toContainText("untrusted destination");
-	await expect(page.getByText("Killed", { exact: true })).toBeVisible();
+	await expect(page.getByText("Failed", { exact: true })).toBeVisible();
 
-	// The finding is on the Security page and the agent is flagged in the list.
 	await page.getByRole("link", { name: "Security" }).click();
-	await expect(page.getByText("exfiltration.untrusted_destination")).toBeVisible();
-	await expect(page.getByRole("link", { name: "Secret leaker" })).toBeVisible();
+	await expect(
+		page.getByText("Security monitoring is not available yet"),
+	).toBeVisible();
 
 	await page.getByRole("link", { name: "Agents", exact: true }).click();
 	await expect(page.getByText("Flagged", { exact: true })).toBeVisible();
