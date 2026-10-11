@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
+import { THEME_STORAGE_KEY } from "#/lib/theme";
 import { renderWithProviders } from "#/test/render";
 import { AppShell } from "./app-shell";
 
@@ -72,5 +73,40 @@ describe("AppShell", () => {
 		expect(
 			within(menu).queryByRole("menuitem", { name: /sign out/i }),
 		).not.toBeInTheDocument();
+	});
+
+	it("switches between light and dark from the account menu and remembers it", async () => {
+		const user = userEvent.setup();
+		renderWithProviders(
+			<AppShell user={me}>
+				<p>Page body</p>
+			</AppShell>,
+		);
+		await user.click(
+			await screen.findByRole("button", {
+				name: /account menu for angel/i,
+			}),
+		);
+
+		const toggle = await screen.findByRole("menuitem", { name: /theme/i });
+		expect(toggle).toHaveAccessibleName("Theme: light");
+		expect(toggle).toHaveTextContent("Theme");
+		expect(document.documentElement).not.toHaveClass("dark");
+
+		await user.click(toggle);
+
+		expect(document.documentElement).toHaveClass("dark");
+		expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe("dark");
+		// The menu stays open so the switch is visible where it was made.
+		expect(
+			await screen.findByRole("menuitem", { name: "Theme: dark" }),
+		).toBeInTheDocument();
+
+		await user.click(screen.getByRole("menuitem", { name: "Theme: dark" }));
+
+		expect(document.documentElement).not.toHaveClass("dark");
+		expect(
+			await screen.findByRole("menuitem", { name: "Theme: light" }),
+		).toBeInTheDocument();
 	});
 });

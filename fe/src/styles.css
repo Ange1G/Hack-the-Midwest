@@ -82,6 +82,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --sea-ink: #d7ece8;
   --sea-ink-soft: #afcdc8;
   --lagoon: #60d7cf;
@@ -269,6 +270,13 @@ body::after {
   mask-image: radial-gradient(circle at 50% 30%, black, transparent 78%);
 }
 
+/* The glow and grid overlays are built from white and read as grey circles on
+   the dark palette, so dark mode keeps a flat background. */
+.dark body::before,
+.dark body::after {
+  display: none;
+}
+
 a {
   color: var(--lagoon-deep);
   text-decoration-color: rgba(50, 143, 151, 0.4);
@@ -334,6 +342,19 @@ a {
     color 180ms ease,
     border-color 180ms ease,
     transform 180ms ease;
+}
+
+/* Theme switch. lib/theme.ts reveals the new theme by animating a circle on
+   ::view-transition-new(root); the default cross-fade is turned off so the old
+   theme stays put underneath, and the page stays clickable meanwhile. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition {
+  pointer-events: none;
 }
 
 @layer base {

@@ -9,6 +9,9 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   reporter: 'list',
+  // The first page load of a fresh Vite server compiles the app on demand;
+  // with three workers starting at once that can exceed the 5 s default.
+  expect: { timeout: 15_000 },
   use: {
     baseURL,
     trace: 'on-first-retry',

@@ -28,6 +28,14 @@ async function expectAccessible(page: Page, screenName: string) {
 	);
 }
 
+// Computed `display` of the decorative body::before and body::after overlays.
+function backgroundOverlays(page: Page) {
+	return page.evaluate(() => [
+		getComputedStyle(document.body, "::before").display,
+		getComputedStyle(document.body, "::after").display,
+	]);
+}
+
 test("every screen in the demo flow has no serious accessibility violations", async ({
 	page,
 }) => {
@@ -57,4 +65,39 @@ test("every screen in the demo flow has no serious accessibility violations", as
 	await page.getByRole("link", { name: "View run" }).first().click();
 	await expect(page.getByText("Succeeded", { exact: true })).toBeVisible();
 	await expectAccessible(page, "run page");
+});
+
+test("dark mode is remembered across reloads and keeps the screens accessible", async ({
+	page,
+}) => {
+	await page.goto("/agents");
+	await expect(page.getByRole("link", { name: "Uptime checker" })).toBeVisible();
+	await expect(page.locator("html")).not.toHaveClass(/dark/);
+	expect(await backgroundOverlays(page)).toEqual(["block", "block"]);
+
+	await page.getByRole("button", { name: /account menu/i }).click();
+	await page.getByRole("menuitem", { name: "Theme: light" }).click();
+	await expect(page.locator("html")).toHaveClass(/dark/);
+	await expect(page.getByRole("menuitem", { name: "Theme: dark" })).toBeVisible();
+	await page.keyboard.press("Escape");
+
+	await page.reload();
+	await expect(page.locator("html")).toHaveClass(/dark/);
+	await expect(page.getByRole("link", { name: "Uptime checker" })).toBeVisible();
+	// The light theme's glow and grid overlays read as grey circles on the dark
+	// palette, so dark mode keeps a flat background.
+	expect(await backgroundOverlays(page)).toEqual(["none", "none"]);
+	await expectAccessible(page, "agents list (dark)");
+
+	await page.getByRole("link", { name: "Uptime checker" }).click();
+	await expect(
+		page.getByRole("heading", { name: "Uptime checker" }),
+	).toBeVisible();
+	await expectAccessible(page, "agent detail (dark)");
+
+	await page.getByRole("link", { name: "Agents", exact: true }).click();
+	await page.getByRole("link", { name: "New agent" }).click();
+	await page.getByRole("button", { name: "Add HTTP call" }).click();
+	await expect(page.getByLabel("URL", { exact: true })).toBeVisible();
+	await expectAccessible(page, "agent builder (dark)");
 });

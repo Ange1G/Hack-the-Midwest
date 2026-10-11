@@ -44,6 +44,9 @@ afterEach(() => {
 	server.events.removeAllListeners();
 	resetMockState();
 	resetCurrentUser();
+	// The theme lives on <html> and in localStorage, outside React's tree.
+	document.documentElement.classList.remove("dark");
+	window.localStorage.clear();
 	cleanup();
 });
 

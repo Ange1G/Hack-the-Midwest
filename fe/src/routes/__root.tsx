@@ -6,6 +6,7 @@ import {
 	Scripts,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
+import { THEME_BOOT_SCRIPT } from "#/lib/theme";
 
 import appCss from "../styles.css?url";
 
@@ -18,6 +19,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 				{ title: "Agent Platform" },
 			],
 			links: [{ rel: "stylesheet", href: appCss }],
+			// Applies a remembered dark theme before the first paint.
+			scripts: [{ children: THEME_BOOT_SCRIPT }],
 		}),
 		shellComponent: RootDocument,
 	},
@@ -25,7 +28,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootDocument({ children }: { children: React.ReactNode }) {
 	return (
-		<html lang="en">
+		// The boot script may add the dark class before React hydrates.
+		<html lang="en" suppressHydrationWarning>
 			<head>
 				<HeadContent />
 			</head>

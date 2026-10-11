@@ -1,9 +1,11 @@
-import { ChevronsUpDown } from "lucide-react";
+import { ChevronsUpDown, MoonStar, Sun } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "#/components/ui/avatar";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
+	DropdownMenuItem,
 	DropdownMenuLabel,
+	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu";
 import {
@@ -13,11 +15,14 @@ import {
 	useSidebar,
 } from "#/components/ui/sidebar";
 import type { SessionDisplayContext } from "#/config/developer-contexts";
+import { toggleTheme, useTheme } from "#/lib/theme";
 import { cn } from "#/lib/utils";
 
 export function NavUser({ session }: { session: SessionDisplayContext }) {
 	const { isMobile, state } = useSidebar();
 	const isCollapsed = state === "collapsed";
+	const theme = useTheme();
+	const nextTheme = theme === "dark" ? "light" : "dark";
 
 	return (
 		<SidebarMenu>
@@ -71,6 +76,34 @@ export function NavUser({ session }: { session: SessionDisplayContext }) {
 								) : null}
 							</div>
 						</DropdownMenuLabel>
+						<DropdownMenuSeparator />
+						<DropdownMenuItem
+							aria-label={`Theme: ${theme}`}
+							title={`Switch to ${nextTheme} theme`}
+							onSelect={(event) => {
+								// Keep the menu open so the switch is visible where it was made.
+								event.preventDefault();
+								const item = event.currentTarget;
+								const rect =
+									item instanceof HTMLElement
+										? item.getBoundingClientRect()
+										: undefined;
+								toggleTheme(
+									rect
+										? {
+												x: rect.left + rect.width / 2,
+												y: rect.top + rect.height / 2,
+											}
+										: undefined,
+								);
+							}}
+						>
+							<span className="relative size-4 shrink-0" aria-hidden="true">
+								<Sun className="absolute inset-0 size-4 rotate-0 scale-100 transition-all duration-500 dark:-rotate-90 dark:scale-0" />
+								<MoonStar className="absolute inset-0 size-4 rotate-90 scale-0 transition-all duration-500 dark:rotate-0 dark:scale-100" />
+							</span>
+							Theme
+						</DropdownMenuItem>
 					</DropdownMenuContent>
 				</DropdownMenu>
 			</SidebarMenuItem>
