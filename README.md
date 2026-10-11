@@ -1,4 +1,4 @@
-# Agent Platform
+# Stragents
 
 A multi-tenant platform for building, configuring, and running user-defined AI agents in isolated execution environments.
 
@@ -11,7 +11,7 @@ The platform provides agent orchestration, reusable tools, integrations, distrib
 - **Agent management:** Create, configure, execute, and monitor custom agents.
 - **Agent orchestration:** Use AWS Strands Agents to orchestrate agent behavior and tool interactions.
 - **Isolated execution:** Run user agents in Docker containers hosted on Akamai Cloud infrastructure.
-- **Tool primitives:** Reusable HTTP connectors; MCP connector definitions stored and referenced at run time.
+- **Tool primitives:** Reusable HTTP, MCP, and database connectors. HTTP calls a fixed URL; optional query/body allowlists let the model fill values. MCP and database tools execute in the isolated runner.
 - **Bring-your-own integrations:** Connect user-provided HTTP endpoints and MCP servers using user-supplied configuration and credentials, encrypted at rest.
 - **Distributed execution:** Execute long-running jobs asynchronously; a worker polls the task queue and launches Docker containers independently of the API.
 - **Execution observability:** Track execution status (`queued`, `running`, `succeeded`, `failed`, `timed_out`), results, errors, and metadata.
@@ -44,10 +44,10 @@ The platform provides agent orchestration, reusable tools, integrations, distrib
                          +---------------+---------------+
                          |                               |
                          v                               v
-                     HTTP Tools                    MCP Servers
-                  (fixed URL/method)             (user-provided,
-                  credentials injected            currently stored
-                  per execution                  not executed)
+                     HTTP Tools                    MCP Servers              Databases
+                  (fixed URL/method;            (user-provided,          (external or
+                   optional query/body           tools allowlisted         provisioned)
+                   params from the model)        and executed)
 ```
 
 ### Technology stack
@@ -98,7 +98,12 @@ The production message broker, container scheduling strategy, and authentication
     ├── 2026-10-10-strands-openai-runner/
     ├── 2026-10-10-agent-execution-http-tools/
     ├── 2026-10-10-ssl-ca-bundle/
-    └── 2026-10-10-frontend-backend-integration/
+    ├── 2026-10-10-frontend-backend-integration/
+    ├── 2026-10-11-http-parameterized/
+    ├── 2026-10-11-mcp-tools-preview/
+    ├── 2026-10-11-knowledge-connector/
+    ├── 2026-10-11-notification-connector/
+    └── 2026-10-11-structured-agent-output/
 ```
 
 ## API overview
@@ -110,6 +115,7 @@ All user-facing routes are under `/api/v1`. Dev/test auth: `X-Dev-User-SSO: <sso
 | List connector types | `GET /api/v1/connector-types` | 200 | Schema discovery; no `{user_sso}` |
 | Create connector | `POST /api/v1/connectors/{user_sso}` | 201 | Credentials encrypted at rest |
 | List connectors | `GET /api/v1/connectors/{user_sso}` | 200 | Paginated |
+| List MCP tools | `GET /api/v1/connectors/{user_sso}/{connector_id}/tools` | 200 | MCP only; live `tools/list` |
 | Create agent | `POST /api/v1/agents/{user_sso}` | 201 | References connector UUIDs |
 | List agents | `GET /api/v1/agents/{user_sso}` | 200 | Paginated |
 | Get agent | `GET /api/v1/agents/{user_sso}/{agent_id}` | 200 | |

@@ -1,4 +1,4 @@
-# Agent Platform API
+# Stragents API
 
 Platform requirements and architecture: [../AGENTS.md](../AGENTS.md) and [../README.md](../README.md) at the repository root.
 
@@ -87,8 +87,15 @@ Every connector follows the generic contract:
 
 | `type` | `credentials` | `config` |
 | --- | --- | --- |
-| `http` | `xApiKey`, `authorizationHeader` | `method` (GET/POST), `URL`, `payload` |
+| `http` | `xApiKey`, `authorizationHeader` | `method` (GET/POST), `URL`, `payload`, optional `queryParams` / `bodyParams` |
 | `mcp` | `xApiKey`, `authorizationHeader` | `URL`, `transport` (`streamableHttp`) |
+| `notification` | `webhookUrl` (required), `xApiKey`, `authorizationHeader` | `bodyParams` (keys the agent fills, e.g. `text`), optional fixed `payload` object |
+
+Notification connectors POST JSON to one destination, such as a Slack incoming webhook.
+The destination URL is a credential because such URLs embed a token: it is encrypted,
+never returned, and the agent and run view only see its host. The agent gets a
+`<name>(body)` tool that accepts only the `bodyParams` keys
+(`spec/2026-10-11-notification-connector/`).
 
 List connector types and their JSON Schemas: `GET /api/v1/connector-types`.
 
@@ -108,6 +115,13 @@ curl -s -X POST -H "X-Dev-User-SSO: sso-user-a" -H "Content-Type: application/js
 ```
 
 List yours: `GET /api/v1/connectors/sso-user-a?page=1&page_size=20`.
+
+Preview tools on an MCP connector (live `tools/list`):
+
+```bash
+curl -s -H "X-Dev-User-SSO: sso-user-a" \
+  "http://localhost:8000/api/v1/connectors/sso-user-a/<connector-id>/tools"
+```
 
 ### Credentials
 
@@ -145,6 +159,12 @@ curl -s -X POST -H "X-Dev-User-SSO: sso-user-a" -H "Content-Type: application/js
 
 `dayOfWeek`: 0 = Sunday ... 6 = Saturday. `timeOfDay`: minutes after midnight (540 = 09:00).
 A connector that does not exist or belongs to another user is rejected with the same `422`.
+
+Optional `configurations.outputSchema` is a JSON Schema (Draft 2020-12, at most 16,000
+characters, local `$ref` only) the agent's final reply must match. The runner validates
+the reply: a match is stored as `result.parsed`; a mismatch fails the run with
+`output_invalid_json` or `output_schema_mismatch` and keeps `result.output`. Chains hand
+`result.parsed` to the next step as compact JSON (`spec/2026-10-11-structured-agent-output/`).
 
 `PATCH /api/v1/agents/{user_sso}/{agent_id}` accepts any of `agentTitle`, `systemPrompt`,
 and `configurations` (at least one required). When `configurations` is sent it fully
@@ -265,9 +285,11 @@ curl -s -X POST -H "X-Dev-User-SSO: sso-user-a" -H "Content-Type: application/js
 
 Poll `GET /api/v1/chains/{sso}/runs/{run-id}` for `status` and `final_result` only.
 The process log is `GET /api/v1/chains/{sso}/runs/{run-id}/steps` (order `[0,1,…]`).
-Handoff text is `Previous step output:\\n` plus the prior `result.output`, truncated
-to `MAX_CHAIN_HANDOFF_BYTES` (default 20,000). Webhooks may target a chain with
-`target_type: chain`.
+Handoff text is `Previous step output:\\n` plus the prior `result.output`, then
+optional `Previous step tool results:\\n` with bounded `tool_calls[].response_body`
+(for HTTP/MCP/DB payloads). The combined text is truncated to
+`MAX_CHAIN_HANDOFF_BYTES` (default 20,000). The worker passes that input to the
+runner as `RUN_INPUT_B64`. Webhooks may target a chain with `target_type: chain`.
 
 The container must reach the API at `EXECUTION_CALLBACK_BASE_URL`
 (default `http://host.docker.internal:8000`). The worker always passes
@@ -275,8 +297,11 @@ The container must reach the API at `EXECUTION_CALLBACK_BASE_URL`
 
 The runner uses AWS Strands Agents with OpenAI (`system_prompt` from the agent record).
 HTTP connectors become Strands tools that call the **stored** method/URL only (the model
-cannot pick a URL). MCP connectors are listed at claim time (fail closed if an
-`allowedTools` name is missing on the server) and become Strands tools over streamable HTTP.
+cannot pick a URL). Optional `queryParams` / `bodyParams` allowlists let the model fill
+query string or POST JSON keys. Preview MCP tools with
+`GET /api/v1/connectors/{sso}/{id}/tools`. MCP connectors are listed at claim time
+(fail closed if an `allowedTools` name is missing on the server) and become Strands
+tools over streamable HTTP.
 See `spec/2026-10-10-strands-openai-runner/`, `spec/2026-10-10-agent-execution-http-tools/`,
 and `spec/2026-10-21-agent-execution-mcp/`.
 
