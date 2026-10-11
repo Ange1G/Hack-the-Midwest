@@ -12,21 +12,29 @@ import {
 	type AgentInput,
 	type AgentUpdate,
 	agentSchema,
+	agentTemplateSchema,
 	type Chain,
 	type ChainCreate,
 	type ChainRun,
 	type ChainRunStatus,
 	type Connector,
 	type ConnectorCreate,
+	type ConnectorTools,
 	chainRunSchema,
 	chainRunStepSchema,
 	chainSchema,
 	connectorSchema,
+	connectorToolsSchema,
 	connectorTypeCatalogSchema,
 	type ExecutionCreate,
 	executionCreateSchema,
 	executionSchema,
 	type Finding,
+	type IntegrationInstall,
+	integrationSchema,
+	type KnowledgeDocumentCreate,
+	knowledgeDocumentSchema,
+	memoryEntrySchema,
 	type Pagination,
 	type Run,
 	type RunStatus,
@@ -56,6 +64,7 @@ export const queryKeys = {
 	agents: ["agents"] as const,
 	agent: (id: string) => ["agents", id] as const,
 	connectors: ["connectors"] as const,
+	connectorTools: (id: string) => ["connectors", id, "tools"] as const,
 	connectorTypes: ["connector-types"] as const,
 	executions: ["executions"] as const,
 	agentRuns: (id: string) => ["agents", id, "runs"] as const,
@@ -67,6 +76,11 @@ export const queryKeys = {
 	chainRuns: (chainId: string) => ["chains", chainId, "runs"] as const,
 	chainRun: (id: string) => ["chain-runs", id] as const,
 	chainRunSteps: (runId: string) => ["chain-runs", runId, "steps"] as const,
+	integrations: ["integrations"] as const,
+	agentTemplates: ["agent-templates"] as const,
+	knowledgeDocuments: (connectorId: string) =>
+		["connectors", connectorId, "documents"] as const,
+	agentMemory: (agentId: string) => ["agents", agentId, "memory"] as const,
 };
 
 export function isActiveRunStatus(status: RunStatus): boolean {
@@ -222,6 +236,39 @@ export function useUpdateAgent() {
 	});
 }
 
+// Agent memory
+
+export function useAgentMemory(agentId: string, enabled = true) {
+	return useQuery({
+		queryKey: queryKeys.agentMemory(agentId),
+		enabled,
+		queryFn: () => {
+			const user = requireUser();
+			return api.get(
+				`${agentsPath(user.user_sso)}/${agentId}/memory`,
+				z.array(memoryEntrySchema),
+			);
+		},
+	});
+}
+
+export function useDeleteMemory(agentId: string) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		// No key clears every entry.
+		mutationFn: (key?: string) => {
+			const user = requireUser();
+			const base = `${agentsPath(user.user_sso)}/${agentId}/memory`;
+			return api.delete(key ? `${base}/${encodeURIComponent(key)}` : base);
+		},
+		onSuccess: () => {
+			void queryClient.invalidateQueries({
+				queryKey: queryKeys.agentMemory(agentId),
+			});
+		},
+	});
+}
+
 // Connectors
 
 export function connectorsQueryOptions() {
@@ -241,6 +288,20 @@ export function connectorsQueryOptions() {
 
 export function useConnectors() {
 	return useQuery(connectorsQueryOptions());
+}
+
+export function useConnectorTools(connectorId: string | undefined) {
+	return useQuery({
+		queryKey: queryKeys.connectorTools(connectorId ?? ""),
+		enabled: Boolean(connectorId),
+		queryFn: (): Promise<ConnectorTools> => {
+			const user = requireUser();
+			return api.get(
+				`${connectorsPath(user.user_sso)}/${connectorId}/tools`,
+				connectorToolsSchema,
+			);
+		},
+	});
 }
 
 export async function createConnectorRecord(
@@ -271,6 +332,22 @@ export function useCreateConnector() {
 	});
 }
 
+export function useDeleteConnector() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (connectorId: string) => {
+			const user = requireUser();
+			return api.delete(`${connectorsPath(user.user_sso)}/${connectorId}`);
+		},
+		onSuccess: (_data, connectorId) => {
+			void queryClient.invalidateQueries({ queryKey: queryKeys.connectors });
+			queryClient.removeQueries({
+				queryKey: queryKeys.connectorTools(connectorId),
+			});
+		},
+	});
+}
+
 export function connectorTypesQueryOptions() {
 	return queryOptions({
 		queryKey: queryKeys.connectorTypes,
@@ -281,6 +358,116 @@ export function connectorTypesQueryOptions() {
 
 export function useConnectorTypes() {
 	return useQuery(connectorTypesQueryOptions());
+}
+
+// Integration catalog and agent templates
+
+export function integrationsQueryOptions() {
+	return queryOptions({
+		queryKey: queryKeys.integrations,
+		queryFn: () => api.get("/integrations", z.array(integrationSchema)),
+		staleTime: Number.POSITIVE_INFINITY,
+	});
+}
+
+export function useIntegrations() {
+	return useQuery(integrationsQueryOptions());
+}
+
+export function useInstallIntegration() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async ({
+			integrationId,
+			...body
+		}: IntegrationInstall & { integrationId: string }): Promise<Connector> => {
+			const user = requireUser();
+			const path = `/integrations/${encodeURIComponent(user.user_sso)}/${encodeURIComponent(integrationId)}/install`;
+			const payload = body.apiKey ? { apiKey: body.apiKey } : {};
+			try {
+				return await api.post(path, connectorSchema, {
+					...payload,
+					...(body.name ? { name: body.name } : {}),
+				});
+			} catch (error) {
+				// Installed before under the default name: keep both connectors.
+				if (error instanceof ApiError && error.status === 409 && !body.name) {
+					const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 6);
+					return api.post(path, connectorSchema, {
+						...payload,
+						name: `${integrationId}_${suffix}`,
+					});
+				}
+				throw error;
+			}
+		},
+		onSuccess: () => {
+			void queryClient.invalidateQueries({ queryKey: queryKeys.connectors });
+		},
+	});
+}
+
+export function agentTemplatesQueryOptions() {
+	return queryOptions({
+		queryKey: queryKeys.agentTemplates,
+		queryFn: () => api.get("/agent-templates", z.array(agentTemplateSchema)),
+		staleTime: Number.POSITIVE_INFINITY,
+	});
+}
+
+export function useAgentTemplates() {
+	return useQuery(agentTemplatesQueryOptions());
+}
+
+// Knowledge documents
+
+export function useKnowledgeDocuments(connectorId: string) {
+	return useQuery({
+		queryKey: queryKeys.knowledgeDocuments(connectorId),
+		queryFn: () => {
+			const user = requireUser();
+			return api.get(
+				`${connectorsPath(user.user_sso)}/${connectorId}/documents`,
+				z.array(knowledgeDocumentSchema),
+			);
+		},
+	});
+}
+
+export function useAddKnowledgeDocument(connectorId: string) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (body: KnowledgeDocumentCreate) => {
+			const user = requireUser();
+			return api.post(
+				`${connectorsPath(user.user_sso)}/${connectorId}/documents`,
+				knowledgeDocumentSchema,
+				body,
+			);
+		},
+		onSuccess: () => {
+			void queryClient.invalidateQueries({
+				queryKey: queryKeys.knowledgeDocuments(connectorId),
+			});
+		},
+	});
+}
+
+export function useDeleteKnowledgeDocument(connectorId: string) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (documentId: string) => {
+			const user = requireUser();
+			return api.delete(
+				`${connectorsPath(user.user_sso)}/${connectorId}/documents/${documentId}`,
+			);
+		},
+		onSuccess: () => {
+			void queryClient.invalidateQueries({
+				queryKey: queryKeys.knowledgeDocuments(connectorId),
+			});
+		},
+	});
 }
 
 // Executions

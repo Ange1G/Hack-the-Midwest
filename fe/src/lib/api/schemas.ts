@@ -80,6 +80,8 @@ export const httpContractSchema = z.object({
 	method: httpMethodSchema,
 	URL: z.string(),
 	payload: z.unknown().optional(),
+	queryParams: z.array(z.string()).optional(),
+	bodyParams: z.array(z.string()).optional(),
 	xApiKey: z.string().nullable().optional(),
 	authorizationHeader: z.string().nullable().optional(),
 	options: httpOptionsSchema.nullable().optional(),
@@ -104,8 +106,26 @@ export const executionResultSchema = z.object({
 	output: z.string().nullable().optional(),
 	model: z.string().nullable().optional(),
 	tool_calls: z.array(z.unknown()).nullable().optional(),
+	// Present when the agent has an output schema and the reply matched it.
+	parsed: z.unknown().optional(),
+	// Added by the API when a memory-enabled agent saved or deleted keys.
+	memory_writes: z
+		.object({
+			set: z.array(z.string()).optional(),
+			deleted: z.array(z.string()).optional(),
+			dropped: z.array(z.string()).optional(),
+		})
+		.nullable()
+		.optional(),
 });
 export type ExecutionResult = z.infer<typeof executionResultSchema>;
+
+// Run error codes for a reply that did not satisfy the agent's output schema.
+export const OUTPUT_SCHEMA_ERROR_CODES: ReadonlySet<string> = new Set([
+	"output_invalid_json",
+	"output_schema_mismatch",
+	"output_schema_invalid",
+]);
 
 export const MAX_RUN_INPUT_LENGTH = 20_000;
 
@@ -152,7 +172,13 @@ export type RunSummary = z.infer<typeof runSummarySchema>;
 
 // Connectors (backend: ConnectorRead)
 
-export const connectorTypeSchema = z.enum(["http", "mcp", "database"]);
+export const connectorTypeSchema = z.enum([
+	"http",
+	"mcp",
+	"database",
+	"notification",
+	"knowledge",
+]);
 export type ConnectorType = z.infer<typeof connectorTypeSchema>;
 
 export const connectorTypeCatalogSchema = z.object({
@@ -182,6 +208,13 @@ export const connectorSchema = z.object({
 });
 export type Connector = z.infer<typeof connectorSchema>;
 
+export const connectorToolsSchema = z.object({
+	connector_id: z.string(),
+	type: z.string(),
+	tools: z.array(z.string()),
+});
+export type ConnectorTools = z.infer<typeof connectorToolsSchema>;
+
 const connectorNameSchema = z
 	.string()
 	.regex(PRIMITIVE_NAME_PATTERN, PRIMITIVE_NAME_MESSAGE);
@@ -201,6 +234,18 @@ const headerCredentialsSchema = z
 	})
 	.optional();
 
+const HTTP_PARAM_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+const MAX_HTTP_PARAMS = 20;
+
+export const httpParamNameSchema = z
+	.string()
+	.regex(HTTP_PARAM_NAME, "Use a letter, then letters, numbers, _ or -");
+
+export const httpParamListSchema = z
+	.array(httpParamNameSchema)
+	.min(1)
+	.max(MAX_HTTP_PARAMS);
+
 export const httpConnectorCreateSchema = z
 	.object({
 		type: z.literal("http"),
@@ -211,6 +256,8 @@ export const httpConnectorCreateSchema = z
 			method: httpMethodSchema,
 			URL: publicUrlSchema,
 			payload: z.unknown().optional(),
+			queryParams: httpParamListSchema.optional(),
+			bodyParams: httpParamListSchema.optional(),
 		}),
 		credentials: headerCredentialsSchema,
 		options: httpOptionsSchema.optional(),
@@ -222,6 +269,13 @@ export const httpConnectorCreateSchema = z
 				path: ["config", "payload"],
 				message:
 					"GET requests cannot include a payload; put parameters in the URL",
+			});
+		}
+		if (body.config.method === "GET" && body.config.bodyParams !== undefined) {
+			ctx.addIssue({
+				code: "custom",
+				path: ["config", "bodyParams"],
+				message: "GET requests cannot include bodyParams; use queryParams",
 			});
 		}
 	});
@@ -303,10 +357,56 @@ export const databaseConnectorCreateSchema = z
 		}
 	});
 
+// The destination URL is a credential: Slack-style webhook URLs embed a token.
+export const notificationConnectorCreateSchema = z
+	.object({
+		type: z.literal("notification"),
+		contractVersion: z.literal(CONTRACT_VERSION),
+		name: connectorNameSchema,
+		description: z.string().optional(),
+		credentials: z.object({
+			webhookUrl: publicUrlSchema,
+			xApiKey: z.string().optional(),
+			authorizationHeader: z.string().optional(),
+		}),
+		config: z.object({
+			bodyParams: httpParamListSchema,
+			payload: z.record(z.string(), z.unknown()).optional(),
+		}),
+		options: httpOptionsSchema.optional(),
+	})
+	.superRefine((body, ctx) => {
+		const fixed = Object.keys(body.config.payload ?? {});
+		const shadowed = body.config.bodyParams.filter((name) =>
+			fixed.includes(name),
+		);
+		if (shadowed.length > 0) {
+			ctx.addIssue({
+				code: "custom",
+				path: ["config", "bodyParams"],
+				message: `Already fixed in the payload: ${shadowed.join(", ")}`,
+			});
+		}
+	});
+
+export const MAX_KNOWLEDGE_RESULTS = 10;
+
+export const knowledgeConnectorCreateSchema = z.object({
+	type: z.literal("knowledge"),
+	contractVersion: z.literal(CONTRACT_VERSION),
+	name: connectorNameSchema,
+	description: z.string().optional(),
+	config: z.object({
+		maxResults: z.number().int().min(1).max(MAX_KNOWLEDGE_RESULTS).optional(),
+	}),
+});
+
 export const connectorCreateSchema = z.discriminatedUnion("type", [
 	httpConnectorCreateSchema,
 	mcpConnectorCreateSchema,
 	databaseConnectorCreateSchema,
+	notificationConnectorCreateSchema,
+	knowledgeConnectorCreateSchema,
 ]);
 export type ConnectorCreate = z.infer<typeof connectorCreateSchema>;
 
@@ -314,6 +414,8 @@ export type ConnectorCreate = z.infer<typeof connectorCreateSchema>;
 
 // Read leniently: an agent whose stored configuration predates the schema
 // renders with no calls and no schedule rather than failing the whole list.
+export const MAX_DELEGATES_PER_AGENT = 5;
+
 export const agentConfigurationsSchema = z
 	.object({
 		primitives: z.record(z.string(), connectorReferenceSchema).catch({}),
@@ -327,6 +429,10 @@ export const agentConfigurationsSchema = z
 			.catch(undefined),
 		dayOfWeek: z.array(z.number().int().min(0).max(6)).catch([]),
 		timeOfDay: z.array(z.number().int().min(0).max(1439)).catch([]),
+		outputSchema: z.record(z.string(), z.unknown()).optional().catch(undefined),
+		// The API omits both when they are off or empty.
+		memory: z.boolean().optional().catch(undefined),
+		delegates: z.array(z.string()).optional().catch(undefined),
 	})
 	.catch({ primitives: {}, dayOfWeek: [], timeOfDay: [] });
 export type AgentConfigurations = z.infer<typeof agentConfigurationsSchema>;
@@ -485,6 +591,15 @@ export const agentInputSchema = z.object({
 					.max(1439, "Times are minutes after midnight, 0 to 1439"),
 			)
 			.max(48, "At most 48 times per day"),
+		outputSchema: z.record(z.string(), z.unknown()).optional(),
+		memory: z.boolean().optional(),
+		delegates: z
+			.array(z.string().min(1))
+			.max(
+				MAX_DELEGATES_PER_AGENT,
+				`At most ${MAX_DELEGATES_PER_AGENT} delegates`,
+			)
+			.optional(),
 	}),
 });
 export type AgentInput = z.infer<typeof agentInputSchema>;
@@ -650,6 +765,81 @@ export const findingSchema = z.object({
 });
 export type Finding = z.infer<typeof findingSchema>;
 
+export const integrationSchema = z.object({
+	id: z.string(),
+	name: z.string(),
+	vendor: z.string(),
+	category: z.string(),
+	description: z.string(),
+	docs_url: z.string(),
+	api_key_url: z.string(),
+	connector_type: connectorTypeSchema,
+	connector_name: z.string(),
+	url: z.string(),
+	api_key_required: z.boolean(),
+	tools: z.array(z.string()),
+	default_allowed_tools: z.array(z.string()),
+});
+export type Integration = z.infer<typeof integrationSchema>;
+
+export const integrationInstallSchema = z.object({
+	apiKey: z.string().trim().max(4000).optional(),
+	name: connectorNameSchema.optional(),
+});
+export type IntegrationInstall = z.infer<typeof integrationInstallSchema>;
+
+export const agentTemplateSchema = z.object({
+	id: z.string(),
+	name: z.string(),
+	description: z.string(),
+	title: z.string(),
+	system_prompt: z.string(),
+	integrations: z.array(z.string()),
+	allowed_tools: z.record(z.string(), z.array(z.string())),
+	memory: z.boolean(),
+	suggested_input: z.string().nullable(),
+});
+export type AgentTemplate = z.infer<typeof agentTemplateSchema>;
+
+export const MAX_KNOWLEDGE_DOCUMENT_BYTES = 100_000;
+export const MAX_KNOWLEDGE_DOCUMENTS = 50;
+
+export const knowledgeDocumentSchema = z.object({
+	id: z.string(),
+	connector_id: z.string(),
+	title: z.string(),
+	size_bytes: z.number(),
+	excerpt: z.string(),
+	created_at: z.string(),
+});
+export type KnowledgeDocument = z.infer<typeof knowledgeDocumentSchema>;
+
+export const knowledgeDocumentCreateSchema = z.object({
+	title: z
+		.string()
+		.trim()
+		.min(1, "Title is required")
+		.max(200, "Title must be at most 200 characters"),
+	body: z
+		.string()
+		.min(1, "Content is required")
+		.refine(
+			(value) =>
+				new TextEncoder().encode(value).length <= MAX_KNOWLEDGE_DOCUMENT_BYTES,
+			"Content must be at most 100 KB",
+		),
+});
+export type KnowledgeDocumentCreate = z.infer<
+	typeof knowledgeDocumentCreateSchema
+>;
+
+export const memoryEntrySchema = z.object({
+	key: z.string(),
+	value: z.unknown(),
+	updated_at: z.string(),
+});
+export type MemoryEntry = z.infer<typeof memoryEntrySchema>;
+
 /** Map a stored HTTP connector onto the display shape the UI already uses. */
 export function httpContractFromConnector(
 	connector: Connector,
@@ -676,6 +866,20 @@ export function httpContractFromConnector(
 		method,
 		URL,
 		...(config.payload !== undefined ? { payload: config.payload } : {}),
+		...(Array.isArray(config.queryParams)
+			? {
+					queryParams: config.queryParams.filter(
+						(item): item is string => typeof item === "string",
+					),
+				}
+			: {}),
+		...(Array.isArray(config.bodyParams)
+			? {
+					bodyParams: config.bodyParams.filter(
+						(item): item is string => typeof item === "string",
+					),
+				}
+			: {}),
 		...(typeof credentials.xApiKey === "string"
 			? { xApiKey: credentials.xApiKey }
 			: {}),
@@ -701,6 +905,8 @@ export function connectorLabel(type: string): string {
 	if (type === "http") return "HTTP";
 	if (type === "mcp") return "MCP";
 	if (type === "database") return "Database";
+	if (type === "notification") return "Notification";
+	if (type === "knowledge") return "Knowledge";
 	return type;
 }
 

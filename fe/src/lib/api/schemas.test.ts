@@ -268,6 +268,32 @@ describe("connectorCreateSchema", () => {
 		);
 	});
 
+	it("accepts HTTP queryParams and refuses them on GET with bodyParams", () => {
+		expect(
+			connectorCreateSchema.safeParse({
+				type: "http",
+				contractVersion: 1,
+				name: "search",
+				config: {
+					method: "GET",
+					URL: "https://api.example.com/search",
+					queryParams: ["q", "limit"],
+				},
+			}).success,
+		).toBe(true);
+		const refused = connectorCreateSchema.safeParse({
+			type: "http",
+			contractVersion: 1,
+			name: "search",
+			config: {
+				method: "GET",
+				URL: "https://api.example.com/search",
+				bodyParams: ["title"],
+			},
+		});
+		expect(refused.success).toBe(false);
+	});
+
 	it("accepts MCP and external database bodies", () => {
 		expect(
 			connectorCreateSchema.safeParse({
