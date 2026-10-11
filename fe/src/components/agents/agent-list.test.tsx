@@ -11,6 +11,13 @@ import { renderWithProviders } from "#/test/render";
 import { signInAs } from "#/test/session";
 import { AgentList } from "./agent-list";
 
+async function tableRow(name: string): Promise<HTMLElement> {
+	const table = await screen.findByRole("table");
+	const row = (await within(table).findByRole("link", { name })).closest("tr");
+	if (!row) throw new Error("expected a table row");
+	return row;
+}
+
 describe("AgentList", () => {
 	it("shows a loading state while agents are being fetched", async () => {
 		signInAs();
@@ -55,10 +62,11 @@ describe("AgentList", () => {
 		renderWithProviders(<AgentList />);
 
 		await waitFor(() => {
-			const safeRow = screen
+			const table = screen.getByRole("table");
+			const safeRow = within(table)
 				.getByRole("link", { name: "Uptime checker" })
 				.closest("tr");
-			const rogueRow = screen
+			const rogueRow = within(table)
 				.getByRole("link", { name: "Secret leaker" })
 				.closest("tr");
 			if (!safeRow || !rogueRow) throw new Error("expected table rows");
@@ -83,10 +91,7 @@ describe("AgentList", () => {
 		const agent = createAgent(owner.user_sso, safeAgentInput);
 		renderWithProviders(<AgentList />);
 
-		const row = (
-			await screen.findByRole("link", { name: "Uptime checker" })
-		).closest("tr");
-		if (!row) throw new Error("expected a table row");
+		const row = await tableRow("Uptime checker");
 
 		expect(within(row).getByRole("button", { name: "Start" })).toBeEnabled();
 		expect(
@@ -104,10 +109,7 @@ describe("AgentList", () => {
 		const user = userEvent.setup();
 		renderWithProviders(<AgentList />);
 
-		const row = (
-			await screen.findByRole("link", { name: "Uptime checker" })
-		).closest("tr");
-		if (!row) throw new Error("expected a table row");
+		const row = await tableRow("Uptime checker");
 
 		await waitFor(() => {
 			expect(within(row).getByText("GET")).toBeInTheDocument();
@@ -115,7 +117,7 @@ describe("AgentList", () => {
 		await user.click(within(row).getByRole("button", { name: "Start" }));
 
 		await waitFor(() => {
-			const updated = screen
+			const updated = within(screen.getByRole("table"))
 				.getByRole("link", { name: "Uptime checker" })
 				.closest("tr");
 			expect(updated).not.toBeNull();
@@ -131,10 +133,7 @@ describe("AgentList", () => {
 		createRun(agent);
 		renderWithProviders(<AgentList />);
 
-		const row = (
-			await screen.findByRole("link", { name: "Uptime checker" })
-		).closest("tr");
-		if (!row) throw new Error("expected a table row");
+		const row = await tableRow("Uptime checker");
 
 		expect(within(row).getByRole("button", { name: "Stop" })).toBeEnabled();
 		expect(
@@ -148,10 +147,7 @@ describe("AgentList", () => {
 		const user = userEvent.setup();
 		const { router } = renderWithProviders(<AgentList />);
 
-		const row = (
-			await screen.findByRole("link", { name: "Uptime checker" })
-		).closest("tr");
-		if (!row) throw new Error("expected a table row");
+		const row = await tableRow("Uptime checker");
 		const createdCell = within(row).getAllByRole("cell")[3];
 		if (!createdCell) throw new Error("expected a created cell");
 		await user.click(createdCell);
@@ -172,10 +168,7 @@ describe("AgentList", () => {
 			</>,
 		);
 
-		const row = (
-			await screen.findByRole("link", { name: "Uptime checker" })
-		).closest("tr");
-		if (!row) throw new Error("expected a table row");
+		const row = await tableRow("Uptime checker");
 
 		await user.click(within(row).getByRole("button", { name: "Delete" }));
 		expect(
@@ -188,6 +181,74 @@ describe("AgentList", () => {
 		await user.click(await within(row).findByRole("button", { name: "Stop" }));
 		expect(
 			await screen.findByText("Stopping a run is not available yet"),
+		).toBeInTheDocument();
+	});
+
+	it("shows recently ran agents as cards that open their latest run", async () => {
+		const owner = signInAs();
+		const agent = createAgent(owner.user_sso, safeAgentInput);
+		const run = createRun(agent);
+		runToCompletion(run);
+		createAgent(owner.user_sso, {
+			...safeAgentInput,
+			agentTitle: "Never ran",
+			configurations: { ...safeAgentInput.configurations, primitives: {} },
+		});
+		renderWithProviders(<AgentList />);
+
+		const recent = await screen.findByRole("region", { name: "Recently ran" });
+		const card = within(recent).getByRole("link", { name: "Uptime checker" });
+		expect(card).toHaveAttribute("href", `/agents/${agent.id}?run=${run.id}`);
+		expect(
+			within(recent).queryByRole("link", { name: "Never ran" }),
+		).not.toBeInTheDocument();
+		expect(
+			within(screen.getByRole("region", { name: "My agents" })).getByRole(
+				"table",
+			),
+		).toBeInTheDocument();
+	});
+
+	it("lists flagged agents under needs attention instead of recently ran", async () => {
+		const owner = signInAs();
+		const rogue = createAgent(owner.user_sso, rogueAgentInput);
+		runToCompletion(createRun(rogue));
+		renderWithProviders(<AgentList />);
+
+		const attention = await screen.findByRole("region", {
+			name: "Needs attention",
+		});
+		await waitFor(() =>
+			expect(
+				within(attention).getByRole("link", { name: "Secret leaker" }),
+			).toBeInTheDocument(),
+		);
+		expect(
+			screen.queryByRole("region", { name: "Recently ran" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("runs an agent from its card and then offers stop", async () => {
+		const owner = signInAs();
+		const agent = createAgent(owner.user_sso, safeAgentInput);
+		runToCompletion(createRun(agent));
+		const user = userEvent.setup();
+		renderWithProviders(
+			<>
+				<AgentList />
+				<Toaster />
+			</>,
+		);
+
+		const recent = await screen.findByRole("region", { name: "Recently ran" });
+		await user.click(
+			within(recent).getByRole("button", { name: "Run Uptime checker" }),
+		);
+		expect(await screen.findByText("Run started")).toBeInTheDocument();
+		expect(
+			await within(recent).findByRole("button", {
+				name: "Stop Uptime checker",
+			}),
 		).toBeInTheDocument();
 	});
 });

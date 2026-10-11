@@ -44,7 +44,7 @@ export function NavUser({
 								{session.avatarUrl ? (
 									<AvatarImage alt="" src={session.avatarUrl} />
 								) : null}
-								<AvatarFallback className="rounded-lg">
+								<AvatarFallback className="rounded-lg text-foreground">
 									{session.initials}
 								</AvatarFallback>
 							</Avatar>

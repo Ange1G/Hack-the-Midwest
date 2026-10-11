@@ -4,6 +4,9 @@ import { expect, type Page, test } from "@playwright/test";
 // Automated WCAG 2.1 AA scan (axe-core, the engine behind Lighthouse's
 // accessibility audit) of every screen in the demo flow. The navigation bar
 // is excluded because it is styled separately; see spec implementation.md.
+// Page transitions fade content in; axe would measure blended mid-fade colours.
+test.use({ reducedMotion: "reduce" });
+
 async function expectAccessible(page: Page, screenName: string) {
 	const results = await new AxeBuilder({ page })
 		.withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
@@ -44,7 +47,14 @@ test("signed-in screens have no serious accessibility violations", async ({
 	await expect(
 		page.getByRole("heading", { name: "Agents", exact: true }),
 	).toBeVisible();
-	await expect(page.getByRole("link", { name: "Secret leaker" })).toBeVisible();
+	await expect(
+		page.getByRole("table").getByRole("link", { name: "Secret leaker" }),
+	).toBeVisible();
+	await expect(
+		page
+			.getByRole("region", { name: "Needs attention" })
+			.getByRole("link", { name: "Secret leaker", exact: true }),
+	).toBeVisible();
 	await expectAccessible(page, "agents list");
 
 	await page.getByRole("link", { name: "New agent" }).click();
@@ -65,7 +75,10 @@ test("signed-in screens have no serious accessibility violations", async ({
 	await expectAccessible(page, "connector builder");
 
 	await page.getByRole("link", { name: "Agents", exact: true }).click();
-	await page.getByRole("link", { name: "Secret leaker" }).click();
+	await page
+		.getByRole("table")
+		.getByRole("link", { name: "Secret leaker" })
+		.click();
 	await expect(
 		page.getByRole("heading", { name: "Secret leaker" }),
 	).toBeVisible();
@@ -75,6 +88,7 @@ test("signed-in screens have no serious accessibility violations", async ({
 	await expectAccessible(page, "agent detail with failed run");
 
 	await page.getByRole("link", { name: "View run" }).first().click();
+	await expect(page.getByRole("link", { name: "Back to agent" })).toBeVisible();
 	await expect(page.getByRole("alert")).toContainText(
 		"Terminated by the security monitor",
 	);
@@ -92,7 +106,10 @@ test("signed-in screens have no serious accessibility violations", async ({
 	).toBeVisible();
 	await expectAccessible(page, "chains list");
 
-	await page.getByRole("link", { name: "Triage then summarize" }).click();
+	await page
+		.getByRole("table")
+		.getByRole("link", { name: "Triage then summarize" })
+		.click();
 	await expect(
 		page.getByRole("heading", { name: "Triage then summarize" }),
 	).toBeVisible();

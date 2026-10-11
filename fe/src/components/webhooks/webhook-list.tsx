@@ -1,5 +1,14 @@
 import { Link } from "@tanstack/react-router";
-import { Loader2Icon, PlusIcon, Trash2Icon, WebhookIcon } from "lucide-react";
+import {
+	BotIcon,
+	CheckIcon,
+	CopyIcon,
+	GitBranchIcon,
+	Loader2Icon,
+	PlusIcon,
+	Trash2Icon,
+	WebhookIcon,
+} from "lucide-react";
 import { useState } from "react";
 import { DataTable, type DataTableColumn } from "#/components/data-table";
 import {
@@ -7,10 +16,23 @@ import {
 	DataTableActionsCell,
 } from "#/components/data-table-action-button";
 import { Section } from "#/components/layout/page";
+import { CardGrid, CardGridItem } from "#/components/list/card-grid";
+import { ListSection } from "#/components/list/list-section";
+import {
+	cardLinkProps,
+	ResourceCard,
+	ResourceCardActions,
+	ResourceCardBody,
+	ResourceCardFooter,
+	ResourceCardHeader,
+	ResourceCardIcon,
+	ResourceCardTitle,
+} from "#/components/list/resource-card";
 import { Notice } from "#/components/notice";
 import { RelativeTime } from "#/components/relative-time";
 import { OutputBlock } from "#/components/runs/output-block";
 import { EmptyState, ErrorState, LoadingState } from "#/components/states";
+import { ToneBadge } from "#/components/tone-badge";
 import { Button } from "#/components/ui/button";
 import { Label } from "#/components/ui/label";
 import {
@@ -30,7 +52,11 @@ import {
 } from "#/lib/api/queries";
 import type { Webhook } from "#/lib/api/schemas";
 import { notify } from "#/lib/feedback";
+import { newestFirst } from "#/lib/list-sections";
 import { buttonLinkClass, tableLinkClass } from "#/lib/styles";
+import { useCopy } from "#/lib/use-copy";
+
+const CARD_LIMIT = 3;
 
 export function WebhookList() {
 	const webhooks = useWebhooks();
@@ -64,6 +90,18 @@ export function WebhookList() {
 		id
 			? (chains.data?.items.find((chain) => chain.id === id)?.title ?? id)
 			: "—";
+
+	const remove = (webhook: Webhook) =>
+		deleteWebhook.mutate(webhook.id, {
+			onSuccess: () => notify.success("Webhook deleted"),
+			onError: (error) => notify.error("Could not delete the webhook", error),
+		});
+	const isDeleting = (webhook: Webhook) =>
+		deleteWebhook.isPending && deleteWebhook.variables === webhook.id;
+	const targetTitle = (webhook: Webhook) =>
+		webhook.target_type === "chain"
+			? chainTitle(webhook.target_chain_id)
+			: agentTitle(webhook.target_agent_id);
 
 	const columns: DataTableColumn<Webhook>[] = [
 		{
@@ -139,17 +177,8 @@ export function WebhookList() {
 						label="Delete webhook"
 						icon={<Trash2Icon className="size-4" />}
 						destructive
-						pending={
-							deleteWebhook.isPending &&
-							deleteWebhook.variables === row.original.id
-						}
-						onClick={() =>
-							deleteWebhook.mutate(row.original.id, {
-								onSuccess: () => notify.success("Webhook deleted"),
-								onError: (error) =>
-									notify.error("Could not delete the webhook", error),
-							})
-						}
+						pending={isDeleting(row.original)}
+						onClick={() => remove(row.original)}
 					/>
 				</DataTableActionsCell>
 			),
@@ -317,12 +346,119 @@ curl -s -X POST '${webhookFireUrl(created.id)}' \\
 					}
 				/>
 			) : (
-				<DataTable
-					columns={columns}
-					data={webhooks.data.items}
-					caption="Your webhooks"
-				/>
+				<>
+					<ListSection
+						title="Recently created"
+						description="Copy a fire URL to hand to an integrator."
+					>
+						<CardGrid>
+							{newestFirst(
+								webhooks.data.items,
+								(webhook) => webhook.created_at,
+								CARD_LIMIT,
+							).map((webhook) => (
+								<CardGridItem key={webhook.id}>
+									<WebhookCard
+										webhook={webhook}
+										targetTitle={targetTitle(webhook)}
+										deleting={isDeleting(webhook)}
+										onDelete={() => remove(webhook)}
+									/>
+								</CardGridItem>
+							))}
+						</CardGrid>
+					</ListSection>
+					<ListSection title="All webhooks" count={webhooks.data.items.length}>
+						<DataTable
+							columns={columns}
+							data={webhooks.data.items}
+							caption="Your webhooks"
+							density="compact"
+						/>
+					</ListSection>
+				</>
 			)}
 		</div>
+	);
+}
+
+function WebhookCard({
+	webhook,
+	targetTitle,
+	deleting,
+	onDelete,
+}: {
+	webhook: Webhook;
+	targetTitle: string;
+	deleting: boolean;
+	onDelete: () => void;
+}) {
+	const { copied, copy } = useCopy();
+	const isChain = webhook.target_type === "chain";
+	return (
+		<ResourceCard>
+			<ResourceCardHeader>
+				<ResourceCardIcon>
+					{isChain ? <GitBranchIcon /> : <BotIcon />}
+				</ResourceCardIcon>
+				<ResourceCardTitle>
+					{isChain && webhook.target_chain_id ? (
+						<Link
+							to="/chains/$chainId"
+							params={{ chainId: webhook.target_chain_id }}
+							{...cardLinkProps}
+						>
+							{targetTitle}
+						</Link>
+					) : !isChain && webhook.target_agent_id ? (
+						<Link
+							to="/agents/$agentId"
+							params={{ agentId: webhook.target_agent_id }}
+							{...cardLinkProps}
+						>
+							{targetTitle}
+						</Link>
+					) : (
+						<span className="font-medium">{targetTitle}</span>
+					)}
+				</ResourceCardTitle>
+				<ResourceCardActions>
+					<DataTableActionButton
+						label={`Delete webhook for ${targetTitle}`}
+						icon={<Trash2Icon className="size-4" />}
+						destructive
+						pending={deleting}
+						onClick={onDelete}
+					/>
+				</ResourceCardActions>
+			</ResourceCardHeader>
+			<ResourceCardBody>
+				<p className="text-muted-foreground">
+					Starts a run of this {isChain ? "chain" : "agent"}.
+				</p>
+			</ResourceCardBody>
+			<ResourceCardFooter>
+				<div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+					<ToneBadge tone={webhook.disabled ? "neutral" : "success"}>
+						{webhook.disabled ? "Disabled" : "Active"}
+					</ToneBadge>
+					<RelativeTime iso={webhook.created_at} className="truncate" />
+				</div>
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					aria-label={copied ? "Copied" : `Copy URL for ${targetTitle}`}
+					onClick={() => void copy(webhookFireUrl(webhook.id))}
+				>
+					{copied ? (
+						<CheckIcon aria-hidden="true" />
+					) : (
+						<CopyIcon aria-hidden="true" />
+					)}
+					{copied ? "Copied" : "Copy URL"}
+				</Button>
+			</ResourceCardFooter>
+		</ResourceCard>
 	);
 }

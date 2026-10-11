@@ -1,6 +1,14 @@
 import { Link } from "@tanstack/react-router";
-import { PlugIcon } from "lucide-react";
+import {
+	DatabaseIcon,
+	GlobeIcon,
+	type LucideIcon,
+	PlugIcon,
+	ServerIcon,
+} from "lucide-react";
+import { useState } from "react";
 import { DataTable, type DataTableColumn } from "#/components/data-table";
+import { ListSection } from "#/components/list/list-section";
 import { RelativeTime } from "#/components/relative-time";
 import { EmptyState, ErrorState, LoadingState } from "#/components/states";
 import { ToneBadge } from "#/components/tone-badge";
@@ -8,10 +16,22 @@ import { Button } from "#/components/ui/button";
 import { useConnectors } from "#/lib/api/queries";
 import {
 	type Connector,
+	type ConnectorType,
 	connectorConfigRecord,
 	connectorLabel,
 } from "#/lib/api/schemas";
 import { buttonLinkClass } from "#/lib/styles";
+import { cn } from "#/lib/utils";
+
+const TYPE_CARDS: {
+	type: ConnectorType;
+	icon: LucideIcon;
+	description: string;
+}[] = [
+	{ type: "http", icon: GlobeIcon, description: "GET and POST endpoints" },
+	{ type: "mcp", icon: ServerIcon, description: "Tools from your MCP servers" },
+	{ type: "database", icon: DatabaseIcon, description: "Database connections" },
+];
 
 // The non-secret address a connector points at, for scanning the list.
 function connectorTarget(connector: Connector): string | null {
@@ -106,12 +126,93 @@ export function ConnectorList() {
 		);
 	}
 
+	return <ConnectorSections connectors={connectors.data} />;
+}
+
+function ConnectorSections({ connectors }: { connectors: Connector[] }) {
+	const [filter, setFilter] = useState<ConnectorType | null>(null);
+	const shown = filter
+		? connectors.filter((connector) => connector.type === filter)
+		: connectors;
+	const filterLabel = filter ? connectorLabel(filter) : null;
+
 	return (
-		<DataTable
-			columns={columns}
-			data={connectors.data}
-			caption="Your connectors"
-			density="compact"
-		/>
+		<div className="space-y-10">
+			<ListSection
+				title="By type"
+				description="Pick a type to filter the list below."
+				action={
+					filter ? (
+						<Button
+							type="button"
+							variant="ghost"
+							size="sm"
+							onClick={() => setFilter(null)}
+						>
+							Clear filter
+						</Button>
+					) : null
+				}
+			>
+				<ul className="grid gap-3 sm:grid-cols-3">
+					{TYPE_CARDS.map(({ type, icon: Icon, description }) => {
+						const count = connectors.filter(
+							(connector) => connector.type === type,
+						).length;
+						const active = filter === type;
+						return (
+							<li key={type}>
+								<button
+									type="button"
+									aria-pressed={active}
+									aria-label={`${connectorLabel(type)} connectors (${count})`}
+									onClick={() => setFilter(active ? null : type)}
+									className={cn(
+										"flex w-full cursor-pointer items-start gap-3 rounded-lg border bg-card p-4 text-left outline-none transition-[border-color,box-shadow] duration-150",
+										"hover:border-foreground/20 hover:shadow-sm focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
+										"motion-safe:active:scale-[0.99]",
+										active && "border-foreground ring-1 ring-foreground",
+									)}
+								>
+									<span
+										aria-hidden="true"
+										className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground"
+									>
+										<Icon className="size-4" />
+									</span>
+									<span className="min-w-0 flex-1">
+										<span className="flex items-baseline justify-between gap-2">
+											<span className="text-sm font-medium">
+												{connectorLabel(type)}
+											</span>
+											<span className="text-lg font-semibold tracking-tight tabular-nums">
+												{count}
+											</span>
+										</span>
+										<span className="block text-xs text-muted-foreground">
+											{description}
+										</span>
+									</span>
+								</button>
+							</li>
+						);
+					})}
+				</ul>
+			</ListSection>
+			<ListSection
+				title={filterLabel ? `${filterLabel} connectors` : "All connectors"}
+				count={shown.length}
+			>
+				<DataTable
+					columns={columns}
+					data={shown}
+					caption="Your connectors"
+					density="compact"
+					emptyMessage={
+						filterLabel ? `No ${filterLabel} connectors yet.` : undefined
+					}
+				/>
+			</ListSection>
+		</div>
 	);
 }

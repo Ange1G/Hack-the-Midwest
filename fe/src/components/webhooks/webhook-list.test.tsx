@@ -75,9 +75,38 @@ describe("WebhookList", () => {
 		const user = userEvent.setup();
 		renderWithProviders(<WebhookList />);
 
+		const table = await screen.findByRole("table");
 		await user.click(
-			await screen.findByRole("button", { name: /delete webhook/i }),
+			within(table).getByRole("button", { name: /delete webhook/i }),
 		);
 		await waitFor(() => expect(mockState.webhooks).toHaveLength(0));
+	});
+
+	it("copies a fire URL from a recent webhook card without showing its secret", async () => {
+		const owner = signInAs();
+		const agent = createAgent(owner.user_sso, safeAgentInput);
+		const webhook = createWebhook(owner.user_sso, agent.id);
+		const user = userEvent.setup();
+		renderWithProviders(<WebhookList />);
+
+		const recent = await screen.findByRole("region", {
+			name: "Recently created",
+		});
+		expect(
+			await within(recent).findByRole("link", { name: agent.title }),
+		).toHaveAttribute("href", `/agents/${agent.id}`);
+		expect(within(recent).queryByText(webhook.secret)).not.toBeInTheDocument();
+
+		await user.click(
+			within(recent).getByRole("button", {
+				name: `Copy URL for ${agent.title}`,
+			}),
+		);
+		expect(await navigator.clipboard.readText()).toBe(
+			webhookFireUrl(webhook.id),
+		);
+		expect(
+			within(recent).getByRole("button", { name: "Copied" }),
+		).toBeInTheDocument();
 	});
 });

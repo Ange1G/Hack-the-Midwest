@@ -16,6 +16,6 @@ describe("HttpCallChip", () => {
 
 		const methodSegment = container.querySelector("[aria-hidden='true']");
 		expect(methodSegment).toHaveTextContent("POST");
-		expect(methodSegment).toHaveClass("text-info");
+		expect(methodSegment).toHaveClass("bg-info/15", "text-foreground");
 	});
 });

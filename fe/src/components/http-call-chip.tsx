@@ -1,9 +1,11 @@
 import type { HttpMethod } from "#/lib/api/schemas";
 import { cn } from "#/lib/utils";
 
+// The method label stays on the foreground colour so it keeps its contrast
+// whatever tint the palette gives the segment.
 const methodAccent: Record<HttpMethod, string> = {
-	GET: "text-muted-foreground bg-muted",
-	POST: "text-info bg-info/10",
+	GET: "bg-muted/60",
+	POST: "bg-info/15",
 };
 
 export function HttpCallChip({
@@ -20,7 +22,7 @@ export function HttpCallChip({
 		>
 			<span
 				className={cn(
-					"shrink-0 border-r px-1.5 py-1.5 font-medium tracking-wide",
+					"shrink-0 border-r px-1.5 py-1.5 font-medium tracking-wide text-foreground",
 					methodAccent[method],
 				)}
 				aria-hidden="true"

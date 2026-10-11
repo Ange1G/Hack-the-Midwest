@@ -452,7 +452,7 @@ export function AgentForm({
 											<span className="text-sm font-medium" aria-hidden="true">
 												Connector {index + 1}
 											</span>
-											<div className="inline-flex rounded-md border bg-muted p-0.5">
+											<div className="inline-flex rounded-md border bg-muted/50 p-0.5">
 												{(
 													[
 														["create", "Create new"],
@@ -464,7 +464,7 @@ export function AgentForm({
 														type="button"
 														aria-pressed={attachment.mode === mode}
 														className={cn(
-															"cursor-pointer rounded-[5px] px-2.5 py-1 text-xs font-medium text-muted-foreground transition-[color,background-color,box-shadow] duration-150 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring",
+															"cursor-pointer rounded-[5px] px-2.5 py-1 text-xs font-medium text-foreground/80 transition-[color,background-color,box-shadow] duration-150 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring",
 															attachment.mode === mode &&
 																"bg-background text-foreground shadow-xs",
 														)}

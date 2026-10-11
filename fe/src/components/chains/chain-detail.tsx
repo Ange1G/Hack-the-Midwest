@@ -21,6 +21,7 @@ import type { ChainRun, ChainStepRead } from "#/lib/api/schemas";
 import { notify } from "#/lib/feedback";
 import { formatDateTime } from "#/lib/format";
 import { minutesToTime } from "#/lib/http-contract";
+import { isScheduled } from "#/lib/list-sections";
 import { tableLinkClass, textLinkClass } from "#/lib/styles";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -221,7 +222,7 @@ function ScheduleSummary({
 	const dayOfWeek = schedule?.dayOfWeek ?? [];
 	const timeOfDay = schedule?.timeOfDay ?? [];
 	const month = schedule?.month;
-	if (dayOfWeek.length === 0 && timeOfDay.length === 0 && month == null) {
+	if (!isScheduled(schedule)) {
 		return (
 			<p className="text-sm text-muted-foreground">
 				Not scheduled. Runs only on demand.

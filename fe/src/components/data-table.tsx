@@ -208,7 +208,7 @@ export function DataTable<TData extends RowData>({
 										data-state={selected ? "selected" : undefined}
 										aria-current={selected ? "true" : undefined}
 										className={cn(
-											"group/row hover:bg-muted/40",
+											"group/row hover:bg-muted/40 data-[state=selected]:bg-muted/40 data-[state=selected]:shadow-[inset_2px_0_0_var(--foreground)]",
 											onRowClick && "cursor-pointer",
 										)}
 										onClick={
