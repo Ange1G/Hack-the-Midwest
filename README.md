@@ -101,8 +101,11 @@ The production message broker, container scheduling strategy, and authentication
     ├── 2026-10-10-frontend-backend-integration/
     ├── 2026-10-11-http-parameterized/
     ├── 2026-10-11-mcp-tools-preview/
+    ├── 2026-10-11-agent-memory-delegates/
+    ├── 2026-10-11-integration-catalog/
     ├── 2026-10-11-knowledge-connector/
     ├── 2026-10-11-notification-connector/
+    ├── 2026-10-11-tool-call-ux/
     └── 2026-10-11-structured-agent-output/
 ```
 
@@ -116,6 +119,11 @@ All user-facing routes are under `/api/v1`. Dev/test auth: `X-Dev-User-SSO: <sso
 | Create connector | `POST /api/v1/connectors/{user_sso}` | 201 | Credentials encrypted at rest |
 | List connectors | `GET /api/v1/connectors/{user_sso}` | 200 | Paginated |
 | List MCP tools | `GET /api/v1/connectors/{user_sso}/{connector_id}/tools` | 200 | MCP only; live `tools/list` |
+| Knowledge documents | `GET`/`POST /api/v1/connectors/{user_sso}/{connector_id}/documents`, `DELETE …/{document_id}` | 200/201/204 | Knowledge connectors only; 100 KB per doc, 50 docs |
+| List integrations | `GET /api/v1/integrations` | 200 | Curated catalog (Exa, Agenty, AgentQL) |
+| Install integration | `POST /api/v1/integrations/{user_sso}/{integration_id}/install` | 201 | Body `{apiKey?, name?}`; creates an ordinary connector |
+| List agent templates | `GET /api/v1/agent-templates` | 200 | Starting points built on catalog integrations |
+| Agent memory | `GET`/`DELETE /api/v1/agents/{user_sso}/{agent_id}/memory`, `DELETE …/memory/{key}` | 200/204 | Saved by memory-enabled agents on successful runs |
 | Create agent | `POST /api/v1/agents/{user_sso}` | 201 | References connector UUIDs |
 | List agents | `GET /api/v1/agents/{user_sso}` | 200 | Paginated |
 | Get agent | `GET /api/v1/agents/{user_sso}/{agent_id}` | 200 | |
@@ -352,6 +360,10 @@ The backend MVP is complete and end-to-end verified:
 - [x] Unit and integration tests for the API and worker
 - [x] Dashboard merged on `agent-flow`: sign-in, create agent (HTTP primitives → connectors), enqueue execution, poll results (`result.output`, errors, `timed_out`)
 - [x] CORS for local dashboard ↔ API (`CORS_ORIGINS` / dev defaults)
+- [x] Integration catalog (Exa, Agenty, AgentQL) with one-step install and agent templates
+- [x] Knowledge connectors: uploaded documents searchable by agents (BM25 in the runner)
+- [x] Agent memory across runs and delegate agents (`ask_<agent>` tools)
+- [x] Run view with tool calls by kind, external-call counts, and cited sources
 
 **Next:** Production authentication, security findings API and UI, MCP tool execution in the runner, egress controls, and CI for the full stack.
 
