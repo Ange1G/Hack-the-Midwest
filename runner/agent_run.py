@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 from collections.abc import Callable
 from typing import Any
+
+from structured_output import apply_output_schema, output_schema_from, schema_instructions
 
 DEFAULT_USER_MESSAGE = "Execute your instructions and return a concise summary."
 MAX_OUTPUT_CHARS = 32_000
@@ -72,6 +76,24 @@ def failure_body(code: str, message: str) -> dict[str, Any]:
     }
 
 
+def decode_run_input(
+    *, run_input: str | None = None, run_input_b64: str | None = None
+) -> str | None:
+    """Prefer base64 env from the worker; fall back to legacy `RUN_INPUT`."""
+    if isinstance(run_input_b64, str) and run_input_b64.strip():
+        try:
+            decoded = base64.b64decode(
+                run_input_b64.strip().encode("ascii"), validate=True
+            ).decode("utf-8")
+        except (ValueError, UnicodeError, binascii.Error):
+            decoded = ""
+        if decoded.strip():
+            return decoded
+    if isinstance(run_input, str) and run_input.strip():
+        return run_input
+    return None
+
+
 def user_message_from(raw: str | None) -> str:
     if isinstance(raw, str) and raw.strip():
         return raw.strip()
@@ -86,6 +108,11 @@ def run_turn(
     tool_calls: list[dict[str, Any]] | None = None,
     user_message: str | None = None,
 ) -> dict[str, Any]:
+    schema = output_schema_from(manifest)
     prompt = system_prompt_from(manifest)
+    if schema is not None:
+        prompt += schema_instructions(schema)
     result = invoke(prompt, user_message_from(user_message))
-    return success_body(output_text(result), model_id, tool_calls)
+    return apply_output_schema(
+        success_body(output_text(result), model_id, tool_calls), schema
+    )

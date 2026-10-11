@@ -99,12 +99,24 @@ def execute_database_tool(
 
 
 def summarize_db_call(spec: dict[str, Any], status_line: str) -> dict[str, Any]:
-    first_line = status_line.split("\n", 1)[0][:200]
-    return {
+    status, body = _status_and_body(status_line, MAX_RESULT_CHARS)
+    summary: dict[str, Any] = {
         "name": spec.get("name"),
         "engine": spec.get("engine"),
-        "status": first_line,
+        "status": status,
     }
+    if body:
+        summary["response_body"] = body
+    return summary
+
+
+def _status_and_body(text: str, max_body: int) -> tuple[str, str | None]:
+    first, sep, rest = text.partition("\n")
+    status = first[:200]
+    if not sep:
+        return status, None
+    body = rest[:max_body]
+    return status, body or None
 
 
 def _assert_allowed(spec: dict[str, Any], statement: str) -> None:

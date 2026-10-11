@@ -68,12 +68,25 @@ def call_mcp_tool(
 
 
 def summarize_mcp_call(spec: dict[str, Any], tool_name: str, text: str) -> dict[str, Any]:
-    return {
+    status, body = _status_and_body(text, MAX_RESULT_CHARS)
+    summary: dict[str, Any] = {
         "name": f"{spec.get('name')}__{tool_name}",
         "mcp_tool": tool_name,
         "URL": spec.get("URL"),
-        "status": text.split("\n", 1)[0][:200],
+        "status": status,
     }
+    if body:
+        summary["response_body"] = body
+    return summary
+
+
+def _status_and_body(text: str, max_body: int) -> tuple[str, str | None]:
+    first, sep, rest = text.partition("\n")
+    status = first[:200]
+    if not sep:
+        return status, None
+    body = rest[:max_body]
+    return status, body or None
 
 
 def _headers(credentials: dict[str, str]) -> dict[str, str]:

@@ -15,7 +15,8 @@ docker build -t agent-platform-runner:local .
 | `CALLBACK_URL` | `POST …/internal/executions/{id}/complete` |
 | `CALLBACK_TOKEN` | Hashed at rest by the API |
 | `AGENT_MANIFEST` | JSON: `title`, `system_prompt`, `connector_ids` (no secrets) |
-| `RUN_INPUT` | Optional per-run user message. When unset, the runner uses its default prompt. |
+| `RUN_INPUT_B64` | Optional per-run user message, UTF-8 base64. Preferred so multiline chain handoff survives `docker run -e`. |
+| `RUN_INPUT` | Legacy plaintext fallback. Used only when `RUN_INPUT_B64` is unset. |
 | `OPENAI_API_KEY` | Platform key; never from the client |
 | `OPENAI_MODEL` | Default `gpt-4o-mini` |
 | `HTTP_TOOLS_JSON` | HTTP connector specs (method, URL, payload). No credentials. |
