@@ -1,14 +1,14 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { createAgent, createRun, runToCompletion } from "#/mocks/state";
-import { rogueAgentInput, safeAgentInput } from "#/test/fixtures";
+import { createAgent, createRun } from "#/mocks/state";
+import { safeAgentInput } from "#/test/fixtures";
+import { actAs } from "#/test/identity";
 import { renderWithProviders } from "#/test/render";
-import { signInAs } from "#/test/session";
 import { RunView } from "./run-view";
 
 describe("RunView", () => {
 	it("polls a run from queued to succeeded and shows its output and events", async () => {
-		const owner = signInAs();
+		const owner = actAs();
 		const agent = createAgent(owner.user_sso, safeAgentInput);
 		const run = createRun(agent);
 
@@ -31,24 +31,8 @@ describe("RunView", () => {
 		).toBeInTheDocument();
 	});
 
-	it("shows the killed state together with the security finding", async () => {
-		const owner = signInAs();
-		const agent = createAgent(owner.user_sso, rogueAgentInput);
-		const run = createRun(agent);
-		runToCompletion(run);
-
-		renderWithProviders(<RunView runId={run.id} pollIntervalMs={5} />);
-
-		const alert = await screen.findByRole("alert");
-		expect(alert).toHaveTextContent(/terminated by the security monitor/i);
-		await waitFor(() =>
-			expect(alert).toHaveTextContent(/untrusted destination/i),
-		);
-		expect(screen.getByText(/^killed$/i)).toBeInTheDocument();
-	});
-
 	it("shows an error state when the run does not exist", async () => {
-		signInAs();
+		actAs();
 		renderWithProviders(<RunView runId="run_missing" pollIntervalMs={5} />);
 
 		expect(await screen.findByRole("alert")).toHaveTextContent(/not found/i);

@@ -1,6 +1,6 @@
 import { z } from "zod";
+import { getCurrentUser } from "./identity";
 import { envelope, type Pagination } from "./schemas";
-import { getSessionUser } from "./session";
 
 export const API_BASE_URL: string =
 	import.meta.env.VITE_API_URL ?? "http://localhost:8000/api/v1";
@@ -28,25 +28,20 @@ export class ApiError extends Error {
 	}
 }
 
-export type RequestOptions = { headers?: Record<string, string> };
-
 type Method = "GET" | "POST" | "PATCH" | "DELETE";
 
 async function send(
 	path: string,
 	method: Method,
 	body: unknown,
-	options: RequestOptions,
 ): Promise<Response> {
-	const headers: Record<string, string> = { Accept: "application/json" };
+	const headers: Record<string, string> = {
+		Accept: "application/json",
+		[DEV_USER_HEADER]: getCurrentUser().user_sso,
+	};
 	if (body !== undefined) {
 		headers["Content-Type"] = "application/json";
 	}
-	const user = getSessionUser();
-	if (user) {
-		headers[DEV_USER_HEADER] = user.user_sso;
-	}
-	Object.assign(headers, options.headers);
 
 	let response: Response;
 	try {
@@ -138,9 +133,8 @@ async function request<T>(
 	method: Method,
 	schema: z.ZodType<T>,
 	body?: unknown,
-	options: RequestOptions = {},
 ): Promise<{ data: T; pagination: Pagination | null }> {
-	const response = await send(path, method, body, options);
+	const response = await send(path, method, body);
 	const parsed = envelope(schema).parse(await response.json());
 	if (parsed.data === null) {
 		throw new ApiError(
@@ -153,26 +147,19 @@ async function request<T>(
 }
 
 export const api = {
-	get: <T>(path: string, schema: z.ZodType<T>, options?: RequestOptions) =>
-		request(path, "GET", schema, undefined, options).then(
-			(result) => result.data,
-		),
-	list: <T>(path: string, item: z.ZodType<T>, options?: RequestOptions) =>
-		request(path, "GET", z.array(item), undefined, options).then((result) => ({
+	get: <T>(path: string, schema: z.ZodType<T>) =>
+		request(path, "GET", schema).then((result) => result.data),
+	list: <T>(path: string, item: z.ZodType<T>) =>
+		request(path, "GET", z.array(item)).then((result) => ({
 			items: result.data,
 			pagination: result.pagination,
 		})),
-	post: <T>(
-		path: string,
-		schema: z.ZodType<T>,
-		body?: unknown,
-		options?: RequestOptions,
-	) =>
-		request(path, "POST", schema, body, options).then((result) => result.data),
+	post: <T>(path: string, schema: z.ZodType<T>, body?: unknown) =>
+		request(path, "POST", schema, body).then((result) => result.data),
 	postVoid: async (path: string, body?: unknown): Promise<void> => {
-		await send(path, "POST", body, {});
+		await send(path, "POST", body);
 	},
 	delete: async (path: string): Promise<void> => {
-		await send(path, "DELETE", undefined, {});
+		await send(path, "DELETE", undefined);
 	},
 };

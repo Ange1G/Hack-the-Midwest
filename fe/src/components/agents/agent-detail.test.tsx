@@ -8,12 +8,12 @@ import {
 	runToCompletion,
 } from "#/mocks/state";
 import { safeAgentInput } from "#/test/fixtures";
+import { actAs } from "#/test/identity";
 import { renderWithProviders } from "#/test/render";
-import { signInAs } from "#/test/session";
 import { AgentDetail } from "./agent-detail";
 
 function seedAgent() {
-	const owner = signInAs();
+	const owner = actAs();
 	return createAgent(owner.user_sso, {
 		...safeAgentInput,
 		configurations: {
@@ -100,7 +100,7 @@ describe("AgentDetail", () => {
 	});
 
 	it("shows an error state when the agent does not exist", async () => {
-		signInAs();
+		actAs();
 		renderWithProviders(
 			<AgentDetail agentId="agt_missing" onRunStarted={vi.fn()} />,
 		);

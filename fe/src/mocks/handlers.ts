@@ -227,19 +227,4 @@ export const handlers = [
 		}
 		return ok(run);
 	}),
-
-	http.get(url("/security/findings"), ({ request }) => {
-		const owner = caller(request);
-		if (!owner) return unauthorized();
-		const search = new URL(request.url).searchParams;
-		const agentId = search.get("agent_id");
-		const runId = search.get("run_id");
-		const items = mockState.findings.filter(
-			(finding) =>
-				ownAgent(owner, finding.agent_id) !== undefined &&
-				(agentId === null || finding.agent_id === agentId) &&
-				(runId === null || finding.run_id === runId),
-		);
-		return ok(newestFirst(items));
-	}),
 ];

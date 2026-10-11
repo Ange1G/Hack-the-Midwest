@@ -106,46 +106,6 @@ export function unsafeUrlReason(raw: string): string | null {
 	return null;
 }
 
-// Hosts commonly used to collect exfiltrated data. Used by the mock's run-time
-// monitor; a real deployment would keep this list server-side.
-const UNTRUSTED_DESTINATIONS = [
-	"webhook.site",
-	"requestbin.com",
-	"requestbin.net",
-	"pipedream.net",
-	"ngrok.io",
-	"ngrok.app",
-	"ngrok-free.app",
-	"pastebin.com",
-	"burpcollaborator.net",
-	"interact.sh",
-	"oast.pro",
-	"oast.live",
-	"oast.site",
-	"oast.online",
-	"oast.fun",
-	"oast.me",
-	"beeceptor.com",
-	"requestcatcher.com",
-	"hookbin.com",
-	"mockbin.org",
-];
-
-export function untrustedDestinationReason(raw: string): string | null {
-	let host: string;
-	try {
-		host = new URL(raw).hostname.toLowerCase();
-	} catch {
-		return null;
-	}
-	const matched = UNTRUSTED_DESTINATIONS.some(
-		(domain) => host === domain || host.endsWith(`.${domain}`),
-	);
-	return matched
-		? `HTTP call targeted an untrusted destination (${host}) that is commonly used to collect exfiltrated data. Request blocked and run terminated.`
-		: null;
-}
-
 // Schedule times travel as minutes after midnight (540 = 09:00).
 
 export function timeToMinutes(value: string): number | null {

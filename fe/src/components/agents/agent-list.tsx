@@ -16,7 +16,6 @@ import { HttpCallChip } from "#/components/http-call-chip";
 import { Notice } from "#/components/notice";
 import { EmptyState, ErrorState, LoadingState } from "#/components/states";
 import { StatusBadge } from "#/components/status-badge";
-import { ToneBadge } from "#/components/tone-badge";
 import { Button } from "#/components/ui/button";
 import { isActiveRunStatus, useAgents, useStartRun } from "#/lib/api/queries";
 import type { Agent } from "#/lib/api/schemas";
@@ -33,18 +32,13 @@ const dataColumns: DataTableColumn<Agent>[] = [
 		accessorFn: (agent) => agent.title,
 		header: "Name",
 		cell: ({ row }) => (
-			<div className="flex items-center gap-2">
-				<Link
-					to="/agents/$agentId"
-					params={{ agentId: row.original.id }}
-					className={tableLinkClass}
-				>
-					{row.original.title}
-				</Link>
-				{row.original.flagged ? (
-					<ToneBadge tone="danger">Flagged</ToneBadge>
-				) : null}
-			</div>
+			<Link
+				to="/agents/$agentId"
+				params={{ agentId: row.original.id }}
+				className={tableLinkClass}
+			>
+				{row.original.title}
+			</Link>
 		),
 	},
 	{

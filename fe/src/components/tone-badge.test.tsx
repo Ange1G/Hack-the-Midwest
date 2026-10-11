@@ -5,9 +5,9 @@ import { ToneBadge } from "./tone-badge";
 
 describe("ToneBadge", () => {
 	it("renders label text with a status dot instead of a pill border", () => {
-		const { container } = render(<ToneBadge tone="danger">Flagged</ToneBadge>);
+		const { container } = render(<ToneBadge tone="danger">Failed</ToneBadge>);
 
-		expect(screen.getByText("Flagged")).toBeInTheDocument();
+		expect(screen.getByText("Failed")).toBeInTheDocument();
 		expect(container.querySelector(".rounded-full.border")).toBeNull();
 		expect(container.querySelector("[aria-hidden='true']")).toHaveClass(
 			"bg-(--destructive)",

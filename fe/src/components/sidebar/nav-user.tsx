@@ -1,11 +1,9 @@
-import { ChevronsUpDown, LogOut } from "lucide-react";
+import { ChevronsUpDown } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "#/components/ui/avatar";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
-	DropdownMenuItem,
 	DropdownMenuLabel,
-	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu";
 import {
@@ -15,19 +13,11 @@ import {
 	useSidebar,
 } from "#/components/ui/sidebar";
 import type { SessionDisplayContext } from "#/config/developer-contexts";
-import { useSignOut } from "#/lib/api/queries";
 import { cn } from "#/lib/utils";
 
-export function NavUser({
-	session,
-	onLoggedOut,
-}: {
-	session: SessionDisplayContext;
-	onLoggedOut: () => void;
-}) {
+export function NavUser({ session }: { session: SessionDisplayContext }) {
 	const { isMobile, state } = useSidebar();
 	const isCollapsed = state === "collapsed";
-	const logout = useSignOut();
 
 	return (
 		<SidebarMenu>
@@ -81,16 +71,6 @@ export function NavUser({
 								) : null}
 							</div>
 						</DropdownMenuLabel>
-						<DropdownMenuSeparator />
-						<DropdownMenuItem
-							disabled={logout.isPending}
-							onClick={() =>
-								logout.mutate(undefined, { onSuccess: onLoggedOut })
-							}
-						>
-							<LogOut aria-hidden="true" className="mr-2 size-4 opacity-80" />
-							Sign out
-						</DropdownMenuItem>
 					</DropdownMenuContent>
 				</DropdownMenu>
 			</SidebarMenuItem>

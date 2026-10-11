@@ -2,17 +2,12 @@ import type {
 	Agent,
 	AgentConfigurations,
 	AgentInput,
-	Finding,
 	HttpContract,
 	HttpOptions,
 	Run,
 	RunEvent,
 } from "#/lib/api/schemas";
-import {
-	CONTRACT_VERSION,
-	SECRET_PLACEHOLDER,
-	untrustedDestinationReason,
-} from "#/lib/http-contract";
+import { CONTRACT_VERSION, SECRET_PLACEHOLDER } from "#/lib/http-contract";
 
 // In-memory state behind the mock API. Development and test only. Identity is
 // whatever the X-Dev-User-SSO header says, exactly like the backend's
@@ -22,7 +17,6 @@ export type MockState = {
 	agents: Agent[];
 	runs: Run[];
 	events: RunEvent[];
-	findings: Finding[];
 	ticks: Map<string, number>;
 	counter: number;
 };
@@ -32,7 +26,6 @@ function createState(): MockState {
 		agents: [],
 		runs: [],
 		events: [],
-		findings: [],
 		ticks: new Map(),
 		counter: 0,
 	};
@@ -111,7 +104,6 @@ export function createAgent(owner_user_sso: string, input: AgentInput): Agent {
 		owner_user_sso,
 		created_at: timestamp,
 		updated_at: timestamp,
-		flagged: false,
 		last_run: null,
 	};
 	mockState.agents.push(agent);
@@ -152,7 +144,6 @@ export function createRun(agent: Agent): Run {
 		status: "queued",
 		output: null,
 		error: null,
-		finding_id: null,
 		created_at: now(),
 		started_at: null,
 		finished_at: null,
@@ -177,32 +168,8 @@ function finish(run: Run, agent: Agent, output: string): void {
 	syncLastRun(agent, run);
 }
 
-function kill(run: Run, agent: Agent, rule: string, message: string): void {
-	const finding: Finding = {
-		id: nextId("fnd"),
-		run_id: run.id,
-		agent_id: agent.id,
-		severity: "critical",
-		rule,
-		message,
-		action: "killed",
-		created_at: now(),
-	};
-	mockState.findings.push(finding);
-	pushEvent(run, "security", message, { rule, finding_id: finding.id });
-	run.status = "killed";
-	run.error = "Terminated by the security monitor";
-	run.finding_id = finding.id;
-	run.finished_at = now();
-	agent.flagged = true;
-	syncLastRun(agent, run);
-}
-
 // Advances a run one step each time it is read, so a polling client sees
-// queued, running, and then a terminal state without any wall-clock timers.
-// The monitor rule is deterministic, mirroring the constitution's requirement
-// that critical controls do not depend on an LLM's judgement: unsafe URLs are
-// already refused at save time, so the run-time check watches where data goes.
+// queued, running, and then succeeded without any wall-clock timers.
 export function advanceRun(run: Run): void {
 	if (run.status !== "queued" && run.status !== "running") return;
 	const agent = mockState.agents.find((item) => item.id === run.agent_id);
@@ -236,11 +203,6 @@ export function advanceRun(run: Run): void {
 			primitive: name,
 			method: contract.method,
 		});
-		const reason = untrustedDestinationReason(contract.URL);
-		if (reason) {
-			kill(run, agent, "exfiltration.untrusted_destination", reason);
-			return;
-		}
 		pushEvent(run, "tool_result", `${name} returned 200 OK`, {
 			status: 200,
 			bytes: 1284,

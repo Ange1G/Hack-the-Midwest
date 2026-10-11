@@ -17,8 +17,8 @@ Branch: `feat/frontend-dashboard`
 
 ## Layout proposal
 
-Shell: a left sidebar with the product name, primary nav (Agents, Security), and a user
-menu with sign out at the bottom. A top bar carries the page title and the page's
+Shell: a left sidebar with the product name, primary nav (Agents), and an account
+menu at the bottom. A top bar carries the page title and the page's
 primary action. Content sits in a max-width container. All colours come from the
 existing palette tokens so restyling is a CSS-only job. The navigation bar's styling is
 owned by the backend owner.
@@ -27,12 +27,10 @@ Pages:
 
 | Route | Content |
 |---|---|
-| `/login` | Centered card: development sign-in with the SSO id the API should trust. |
-| `/agents` | Agent list (TanStack Table): title, HTTP call chips, last run status badge, flagged marker. "New agent" action. Empty state with the same action. |
+| `/agents` | Agent list (TanStack Table): title, HTTP call chips, last run status badge. "New agent" action. Empty state with the same action. |
 | `/agents/new` | Builder: name, instructions, HTTP calls (name, method, URL, payload, credentials, retries, timeout), schedule (days, times, month). |
 | `/agents/$agentId` | Header with title, Run button. Tabs: Overview (instructions, HTTP calls, schedule) and Runs (history table). |
-| `/runs/$runId` | Status header with a queued, started, finished timeline. Output panel. Event log. Killed banner with the finding when applicable. |
-| `/security` | Findings table with severity badges and links to the run and the agent. |
+| `/runs/$runId` | Status header with a queued, started, finished timeline. Output panel. Event log. Error notice for failed, terminated, or cancelled runs. |
 
 ## Architecture
 
@@ -41,27 +39,25 @@ fe/src/
   routes/
     __root.tsx
     index.tsx               redirect to /agents
-    login.tsx
-    _app.tsx                authenticated layout, client-only, sidebar shell, session guard
+    _app.tsx                application layout, client-only, sidebar shell, developer identity
     _app/agents/index.tsx, new.tsx, $agentId.tsx
     _app/runs/$runId.tsx
-    _app/security.tsx
   components/ui/            shadcn primitives
   components/               AppShell, PageHeader, DataTable, ToneBadge, Notice, StatusBadge,
-                            states (Loading/Empty/Error), auth/, agents/, runs/, security/
+                            states (Loading/Empty/Error), agents/, runs/
   lib/
     http-contract.ts        the team's HTTP contract rules (URL safety, limits, time helpers)
     api/client.ts           fetch wrapper: base URL, identity header, envelope unwrapping,
                             zod parse, ApiError with per-field messages
     api/schemas.ts          zod schemas and inferred types (the contract)
-    api/session.ts          development identity (X-Dev-User-SSO) kept in sessionStorage
+    api/identity.ts         development identity (X-Dev-User-SSO) from configuration
     api/queries.ts          query keys and hooks
   mocks/
     handlers.ts             MSW handlers mirroring the backend contract plus proposed endpoints
-    state.ts                in-memory state, run lifecycle, deterministic monitor rule
-    seed.ts, demo-account.ts, browser.ts, server.ts
+    state.ts                in-memory state, run lifecycle
+    seed.ts, browser.ts, server.ts
   test/
-    setup.ts, render.tsx, query.tsx, session.ts, fixtures.ts
+    setup.ts, render.tsx, query.tsx, identity.ts, fixtures.ts
 ```
 
 State: server state in TanStack Query, form state in TanStack Form plus local state for
@@ -105,7 +101,6 @@ Conventions (from the backend):
 | GET | `/runs/{run_id}` | | `Run` | proposed |
 | GET | `/runs/{run_id}/events` | | `RunEvent[]` | proposed |
 | POST | `/runs/{run_id}/cancel` | | `Run` | proposed |
-| GET | `/security/findings?agent_id&run_id` | | `Finding[]` | proposed |
 
 ```ts
 // HTTP contract (team spec). Field names are the wire names.
@@ -144,29 +139,23 @@ type Agent = {                       // AgentRead
   owner_user_sso: string
   created_at: string
   updated_at: string
-  // Not in the backend yet. The mock provides them; the frontend defaults them
-  // (false, null) when absent so the real API works today.
-  flagged?: boolean
+  // Not in the backend yet. The mock provides it; the frontend defaults it to
+  // null when absent so the real API works today.
   last_run?: { id: string; status: RunStatus; created_at: string } | null
 }
 
 type RunStatus = "queued" | "running" | "succeeded" | "failed" | "killed" | "cancelled"
 type Run = { id; agent_id; status: RunStatus; output: string | null; error: string | null;
-             finding_id: string | null; created_at; started_at: string | null; finished_at: string | null }
-type RunEvent = { id; run_id; ts; type: "log" | "tool_call" | "tool_result" | "security"; message; data: Record<string, unknown> | null }
-type Finding = { id; run_id; agent_id; severity: "low" | "medium" | "high" | "critical"; rule; message; action: "flagged" | "killed"; created_at }
+             created_at; started_at: string | null; finished_at: string | null }
+type RunEvent = { id; run_id; ts; type: "log" | "tool_call" | "tool_result"; message; data: Record<string, unknown> | null }
 ```
 
 The frontend reads `configurations` leniently: an agent whose stored JSON does not match
 the schema renders with no calls and no schedule instead of failing the list.
 
-Mock monitor rule (deterministic, mirrors the constitution's "enforce deterministically
-where possible"): unsafe URLs are already refused at save time, so the run-time check
-watches where data goes. A run whose first HTTP call targets a destination commonly used
-to collect exfiltrated data (for example `webhook.site`, `ngrok` hosts, `pastebin.com`)
-is killed: the mock emits a `security` event, sets the run to `killed`, creates a
-`critical` finding with rule `exfiltration.untrusted_destination`, and marks the agent
-`flagged`.
+URL safety is enforced at save time: the builder refuses what the backend refuses
+(`unsafeUrlReason`). The mock has no run-time monitor; the findings feature was
+removed on 2026-10-10 (see `spec/2026-10-10-frontend-cleanup/`).
 
 ## Implementation steps
 
@@ -186,6 +175,8 @@ Each step is test-first and ends in a commit.
    field names); mock mirrors the backend and extends it with the proposed endpoints.
 10. Create contract: HTTP calls, schedule, credential masking, save-time URL refusal,
     the backend's configuration error shape; builder rebuilt as an HTTP-call editor.
+11. Cleanup (`spec/2026-10-10-frontend-cleanup/`): login flow, Security page, unused CSS
+    and primitives removed; the identity comes from configuration.
 
 ## Validation strategy
 

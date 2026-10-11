@@ -6,8 +6,8 @@ import { API_BASE_URL } from "#/lib/api/client";
 import { server } from "#/mocks/server";
 import { createAgent, mockState } from "#/mocks/state";
 import { safeAgentInput } from "#/test/fixtures";
+import { actAs } from "#/test/identity";
 import { renderWithProviders } from "#/test/render";
-import { signInAs } from "#/test/session";
 import { AgentForm } from "./agent-form";
 
 async function fillBasics(user: ReturnType<typeof userEvent.setup>) {
@@ -28,7 +28,7 @@ async function addCall(user: ReturnType<typeof userEvent.setup>) {
 
 describe("AgentForm", () => {
 	it("adds an HTTP call with its fields, showing the payload only for POST", async () => {
-		signInAs();
+		actAs();
 		const user = userEvent.setup();
 		renderWithProviders(<AgentForm onCreated={vi.fn()} />);
 		await screen.findByLabelText(/^name$/i);
@@ -48,7 +48,7 @@ describe("AgentForm", () => {
 	});
 
 	it("requires a name and instructions before calling the API", async () => {
-		signInAs();
+		actAs();
 		const user = userEvent.setup();
 		const onCreated = vi.fn();
 		renderWithProviders(<AgentForm onCreated={onCreated} />);
@@ -64,7 +64,7 @@ describe("AgentForm", () => {
 	});
 
 	it("refuses a call to the cloud metadata endpoint before calling the API", async () => {
-		signInAs();
+		actAs();
 		const user = userEvent.setup();
 		const onCreated = vi.fn();
 		renderWithProviders(<AgentForm onCreated={onCreated} />);
@@ -88,7 +88,7 @@ describe("AgentForm", () => {
 	});
 
 	it("requires a call name and URL, and a valid JSON payload", async () => {
-		signInAs();
+		actAs();
 		const user = userEvent.setup();
 		renderWithProviders(<AgentForm onCreated={vi.fn()} />);
 		await fillBasics(user);
@@ -108,7 +108,7 @@ describe("AgentForm", () => {
 	});
 
 	it("creates the agent with the team-spec body and reports the masked result", async () => {
-		signInAs();
+		actAs();
 		const user = userEvent.setup();
 		const onCreated = vi.fn();
 		let sent: unknown;
@@ -166,7 +166,7 @@ describe("AgentForm", () => {
 	});
 
 	it("shows a server-side configuration error on the call it belongs to", async () => {
-		signInAs();
+		actAs();
 		server.use(
 			http.post(`${API_BASE_URL}/agents/:sso`, () =>
 				HttpResponse.json(
@@ -208,7 +208,7 @@ describe("AgentForm", () => {
 	});
 
 	it("prefills a read-only edit shell and disables saving", async () => {
-		const owner = signInAs();
+		const owner = actAs();
 		const agent = createAgent(owner.user_sso, {
 			...safeAgentInput,
 			configurations: {

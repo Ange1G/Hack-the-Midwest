@@ -3,7 +3,8 @@ import { expect, type Page, test } from "@playwright/test";
 
 // Automated WCAG 2.1 AA scan (axe-core, the engine behind Lighthouse's
 // accessibility audit) of every screen in the demo flow. The navigation bar
-// is excluded because it is styled separately; see spec implementation.md.
+// is excluded because it is styled separately; see
+// spec/2026-10-10-frontend-dashboard/implementation.md.
 async function expectAccessible(page: Page, screenName: string) {
 	const results = await new AxeBuilder({ page })
 		.withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
@@ -27,24 +28,14 @@ async function expectAccessible(page: Page, screenName: string) {
 	);
 }
 
-test("the sign-in screen has no serious accessibility violations", async ({
+test("every screen in the demo flow has no serious accessibility violations", async ({
 	page,
 }) => {
-	await page.goto("/login");
-	await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
-	await expectAccessible(page, "login");
-});
-
-test("signed-in screens have no serious accessibility violations", async ({
-	page,
-}) => {
-	await page.goto("/login");
-	await page.getByLabel("SSO id", { exact: true }).fill("admin");
-	await page.getByRole("button", { name: "Sign in" }).click();
+	await page.goto("/agents");
 	await expect(
 		page.getByRole("heading", { name: "Agents", exact: true }),
 	).toBeVisible();
-	await expect(page.getByRole("link", { name: "Secret leaker" })).toBeVisible();
+	await expect(page.getByRole("link", { name: "Uptime checker" })).toBeVisible();
 	await expectAccessible(page, "agents list");
 
 	await page.getByRole("link", { name: "New agent" }).click();
@@ -54,20 +45,16 @@ test("signed-in screens have no serious accessibility violations", async ({
 	await expectAccessible(page, "agent builder");
 
 	await page.getByRole("link", { name: "Agents", exact: true }).click();
-	await page.getByRole("link", { name: "Secret leaker" }).click();
+	await page.getByRole("link", { name: "DevRev ticket triage" }).click();
 	await expect(
-		page.getByRole("heading", { name: "Secret leaker" }),
+		page.getByRole("heading", { name: "DevRev ticket triage" }),
 	).toBeVisible();
 	await expectAccessible(page, "agent detail");
 
+	await page.getByRole("link", { name: "Agents", exact: true }).click();
+	await page.getByRole("link", { name: "Uptime checker" }).click();
 	await page.getByRole("tab", { name: "Runs" }).click();
-	await page.getByRole("link", { name: "View" }).first().click();
-	await expect(page.getByRole("alert")).toContainText(
-		"Terminated by the security monitor",
-	);
-	await expectAccessible(page, "killed run");
-
-	await page.getByRole("link", { name: "Security" }).click();
-	await expect(page.getByText("exfiltration.untrusted_destination")).toBeVisible();
-	await expectAccessible(page, "security findings");
+	await page.getByRole("link", { name: "View run" }).first().click();
+	await expect(page.getByText("Succeeded", { exact: true })).toBeVisible();
+	await expectAccessible(page, "run page");
 });

@@ -23,7 +23,6 @@ import {
 import type { AgentConfigurations, HttpContract, Run } from "#/lib/api/schemas";
 import { formatDateTime, formatDuration } from "#/lib/format";
 import { minutesToTime } from "#/lib/http-contract";
-import { textLinkClass } from "#/lib/styles";
 
 // shadcn renders an inactive tab at 60% of --foreground, which is 4.1:1 on the
 // muted tab background with this palette; 80% keeps the resting state visibly
@@ -91,22 +90,6 @@ export function AgentDetail({
 					</Button>
 				}
 			/>
-
-			{data.flagged ? (
-				<Notice
-					tone="danger"
-					className="mb-6"
-					title="Flagged by the security monitor"
-				>
-					<p>
-						A run of this agent was terminated for a policy violation. See the{" "}
-						<Link to="/security" className={textLinkClass}>
-							Security
-						</Link>{" "}
-						page for the finding.
-					</p>
-				</Notice>
-			) : null}
 
 			{startRun.error ? (
 				<Notice tone="danger" className="mb-4" title="Could not start the run">

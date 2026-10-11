@@ -1,5 +1,4 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { PageHeader } from "#/components/layout/page";
 import { Notice } from "#/components/notice";
@@ -9,15 +8,20 @@ import { type Tone, ToneBadge } from "#/components/tone-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "#/components/ui/card";
 import {
 	agentQueryOptions,
-	findingsQueryOptions,
 	isActiveRunStatus,
 	queryKeys,
 	useRun,
 	useRunEvents,
 } from "#/lib/api/queries";
-import type { Run, RunEvent } from "#/lib/api/schemas";
+import type { Run, RunEvent, RunStatus } from "#/lib/api/schemas";
 import { formatDateTime, formatDuration } from "#/lib/format";
-import { textLinkClass } from "#/lib/styles";
+
+// Terminal states whose error message deserves a notice above the output.
+const errorTitles: Partial<Record<RunStatus, string>> = {
+	failed: "Run failed",
+	killed: "Run terminated",
+	cancelled: "Run cancelled",
+};
 
 export function RunView({
 	runId,
@@ -34,10 +38,6 @@ export function RunView({
 	const agent = useQuery({
 		...agentQueryOptions(agentId ?? ""),
 		enabled: agentId !== undefined,
-	});
-	const findings = useQuery({
-		...findingsQueryOptions({ run_id: runId }),
-		enabled: status === "killed",
 	});
 
 	// Once the run settles, the agent's last-run summary and history are stale.
@@ -63,8 +63,8 @@ export function RunView({
 	}
 
 	const data = run.data;
-	const finding = findings.data?.[0];
 	const live = isActiveRunStatus(data.status);
+	const errorTitle = errorTitles[data.status];
 
 	return (
 		<>
@@ -74,30 +74,8 @@ export function RunView({
 				action={<StatusBadge status={data.status} />}
 			/>
 
-			{data.status === "killed" ? (
-				<Notice
-					tone="danger"
-					className="mb-6"
-					title={data.error ?? "Terminated by the security monitor"}
-				>
-					{finding ? (
-						<>
-							<p>{finding.message}</p>
-							<p>
-								<code>{finding.rule}</code> · severity {finding.severity}
-							</p>
-						</>
-					) : null}
-					<p>
-						<Link to="/security" className={textLinkClass}>
-							See all findings
-						</Link>
-					</p>
-				</Notice>
-			) : null}
-
-			{data.status === "failed" && data.error ? (
-				<Notice tone="danger" className="mb-6" title="Run failed">
+			{errorTitle && data.error ? (
+				<Notice tone="danger" className="mb-6" title={errorTitle}>
 					<p>{data.error}</p>
 				</Notice>
 			) : null}
@@ -163,7 +141,6 @@ const eventTone: Record<RunEvent["type"], Tone> = {
 	log: "neutral",
 	tool_call: "info",
 	tool_result: "info",
-	security: "danger",
 };
 
 function EventLog({ events, live }: { events: RunEvent[]; live: boolean }) {

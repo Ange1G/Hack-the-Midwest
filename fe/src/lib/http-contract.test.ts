@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-	minutesToTime,
-	timeToMinutes,
-	unsafeUrlReason,
-	untrustedDestinationReason,
-} from "./http-contract";
+import { minutesToTime, timeToMinutes, unsafeUrlReason } from "./http-contract";
 
 describe("unsafeUrlReason (mirrors the backend's save-time SSRF guard)", () => {
 	it("accepts public http and https targets", () => {
@@ -42,23 +37,6 @@ describe("unsafeUrlReason (mirrors the backend's save-time SSRF guard)", () => {
 			"Only http and https URLs are allowed",
 		);
 		expect(unsafeUrlReason("not a url")).toBe("Enter a valid URL");
-	});
-});
-
-describe("untrustedDestinationReason (mock monitor rule)", () => {
-	it("flags hosts commonly used to collect exfiltrated data", () => {
-		expect(untrustedDestinationReason("https://webhook.site/abc")).toMatch(
-			/untrusted destination/i,
-		);
-		expect(untrustedDestinationReason("https://x.ngrok-free.app/")).toMatch(
-			/untrusted destination/i,
-		);
-	});
-
-	it("leaves ordinary hosts alone", () => {
-		expect(
-			untrustedDestinationReason("https://hooks.slack.com/services/x"),
-		).toBeNull();
 	});
 });
 

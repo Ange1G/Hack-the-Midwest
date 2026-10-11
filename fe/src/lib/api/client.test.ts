@@ -2,8 +2,9 @@ import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { server } from "#/mocks/server";
+import { actAs } from "#/test/identity";
 import { API_BASE_URL, ApiError, api, DEV_USER_HEADER } from "./client";
-import { setSessionUser } from "./session";
+import { getCurrentUser } from "./identity";
 
 const pingSchema = z.object({ ok: z.boolean() });
 const ping = `${API_BASE_URL}/ping`;
@@ -40,8 +41,20 @@ describe("api.get", () => {
 		await expect(api.get("/ping", pingSchema)).resolves.toEqual({ ok: true });
 	});
 
-	it("sends the development identity header when a session exists", async () => {
-		setSessionUser("angel");
+	it("always sends the configured development identity header", async () => {
+		let header: string | null = "unset";
+		server.use(
+			http.get(ping, ({ request }) => {
+				header = request.headers.get(DEV_USER_HEADER);
+				return ok({ ok: true });
+			}),
+		);
+		await api.get("/ping", pingSchema);
+		expect(header).toBe(getCurrentUser().user_sso);
+	});
+
+	it("sends the identity a test acts as", async () => {
+		actAs("angel");
 		let header: string | null = "unset";
 		server.use(
 			http.get(ping, ({ request }) => {
@@ -51,18 +64,6 @@ describe("api.get", () => {
 		);
 		await api.get("/ping", pingSchema);
 		expect(header).toBe("angel");
-	});
-
-	it("sends no identity header without a session", async () => {
-		let header: string | null = "unset";
-		server.use(
-			http.get(ping, ({ request }) => {
-				header = request.headers.get(DEV_USER_HEADER);
-				return ok({ ok: true });
-			}),
-		);
-		await api.get("/ping", pingSchema);
-		expect(header).toBeNull();
 	});
 
 	it("maps an error envelope to ApiError", async () => {

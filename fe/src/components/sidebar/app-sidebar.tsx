@@ -12,19 +12,13 @@ import {
 	APP_BRANDING,
 	resolveDeveloperContext,
 } from "#/config/developer-contexts";
-import type { User } from "#/lib/api/session";
+import type { User } from "#/lib/api/identity";
 import { cn } from "#/lib/utils";
 import { Logo } from "./logo";
 import DashboardNavigation from "./nav-main";
 import { NavUser } from "./nav-user";
 
-export function DashboardSidebar({
-	user,
-	onLoggedOut,
-}: {
-	user: User;
-	onLoggedOut: () => void;
-}) {
+export function DashboardSidebar({ user }: { user: User }) {
 	const { state } = useSidebar();
 	const isCollapsed = state === "collapsed";
 	const session = resolveDeveloperContext(user);
@@ -65,7 +59,7 @@ export function DashboardSidebar({
 				<DashboardNavigation routes={appNavRoutes} />
 			</SidebarContent>
 			<SidebarFooter className="px-2">
-				<NavUser onLoggedOut={onLoggedOut} session={session} />
+				<NavUser session={session} />
 			</SidebarFooter>
 		</Sidebar>
 	);

@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import {
-	agentInputSchema,
-	agentSchema,
-	envelope,
-	findingSchema,
-	runSchema,
-} from "./schemas";
+import { agentInputSchema, agentSchema, envelope, runSchema } from "./schemas";
 
 // Exactly what POST/GET /api/v1/agents/{user_sso} return per the backend's
 // tests: credentials come back masked, absent fields are omitted.
@@ -48,7 +42,6 @@ const validRun = {
 	status: "queued",
 	output: null,
 	error: null,
-	finding_id: null,
 	created_at: "2026-10-10T19:05:00Z",
 	started_at: null,
 	finished_at: null,
@@ -80,7 +73,7 @@ function issueMessages(input: unknown): string[] {
 }
 
 describe("agentSchema", () => {
-	it("parses an agent as the backend returns it and defaults fields it does not send yet", () => {
+	it("parses an agent as the backend returns it and defaults the run summary", () => {
 		const parsed = agentSchema.parse(backendAgent);
 		expect(parsed).toMatchObject({
 			id: backendAgent.id,
@@ -94,22 +87,19 @@ describe("agentSchema", () => {
 		expect(parsed.configurations.dayOfWeek).toEqual([1, 2, 3, 4, 5]);
 		expect(parsed.configurations.timeOfDay).toEqual([540]);
 		expect(parsed.configurations.month).toBeUndefined();
-		expect(parsed.flagged).toBe(false);
 		expect(parsed.last_run).toBeNull();
 	});
 
-	it("keeps the run summary and flag when a response includes them", () => {
+	it("keeps the run summary when a response includes it", () => {
 		const parsed = agentSchema.parse({
 			...backendAgent,
-			flagged: true,
 			last_run: {
 				id: "run_1",
-				status: "killed",
+				status: "succeeded",
 				created_at: "2026-10-10T19:05:00Z",
 			},
 		});
-		expect(parsed.flagged).toBe(true);
-		expect(parsed.last_run?.status).toBe("killed");
+		expect(parsed.last_run?.status).toBe("succeeded");
 	});
 
 	it("tolerates configurations that do not follow the schema", () => {
@@ -274,21 +264,5 @@ describe("runSchema", () => {
 		expect(() =>
 			runSchema.parse({ ...validRun, status: "exploded" }),
 		).toThrow();
-	});
-});
-
-describe("findingSchema", () => {
-	it("parses a killed finding", () => {
-		const finding = {
-			id: "fnd_1",
-			run_id: "run_1",
-			agent_id: backendAgent.id,
-			severity: "critical",
-			rule: "exfiltration.untrusted_destination",
-			message: "HTTP call targeted an untrusted destination",
-			action: "killed",
-			created_at: "2026-10-10T19:06:00Z",
-		};
-		expect(findingSchema.parse(finding)).toEqual(finding);
 	});
 });

@@ -1,4 +1,4 @@
-import { Bot, type LucideIcon, ShieldAlert } from "lucide-react";
+import { Bot, type LucideIcon } from "lucide-react";
 
 export type AppNavRoute = {
 	id: string;
@@ -11,11 +11,4 @@ export type AppNavRoute = {
 
 export const appNavRoutes: AppNavRoute[] = [
 	{ id: "agents", title: "Agents", to: "/agents", icon: Bot },
-	{
-		id: "security",
-		title: "Security",
-		to: "/security",
-		icon: ShieldAlert,
-		exact: true,
-	},
 ];

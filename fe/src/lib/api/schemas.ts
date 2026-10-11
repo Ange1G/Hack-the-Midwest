@@ -44,18 +44,6 @@ export const envelope = <T extends z.ZodType>(data: T) =>
 		pagination: paginationSchema.nullable().optional(),
 	});
 
-// Identity (development header auth)
-
-export const signInInputSchema = z.object({
-	user_sso: z
-		.string()
-		.trim()
-		.min(1, "Enter your SSO id")
-		.max(255, "Keep the SSO id under 255 characters")
-		.regex(/^\S+$/, "The SSO id cannot contain spaces"),
-});
-export type SignInInput = z.infer<typeof signInInputSchema>;
-
 // HTTP contract (team spec; api/src/app/domains/primitives/http_contract.py)
 
 export const httpMethodSchema = z.enum(["GET", "POST"]);
@@ -138,7 +126,6 @@ export const agentSchema = z.object({
 	created_at: z.string(),
 	updated_at: z.string(),
 	// Not in the backend yet; defaulted so the real API works today.
-	flagged: z.boolean().default(false),
 	last_run: runSummarySchema.nullable().default(null),
 });
 export type Agent = z.infer<typeof agentSchema>;
@@ -281,7 +268,6 @@ export const runSchema = z.object({
 	status: runStatusSchema,
 	output: z.string().nullable(),
 	error: z.string().nullable(),
-	finding_id: z.string().nullable(),
 	created_at: z.string(),
 	started_at: z.string().nullable(),
 	finished_at: z.string().nullable(),
@@ -292,20 +278,8 @@ export const runEventSchema = z.object({
 	id: z.string(),
 	run_id: z.string(),
 	ts: z.string(),
-	type: z.enum(["log", "tool_call", "tool_result", "security"]),
+	type: z.enum(["log", "tool_call", "tool_result"]),
 	message: z.string(),
 	data: z.record(z.string(), z.unknown()).nullable(),
 });
 export type RunEvent = z.infer<typeof runEventSchema>;
-
-export const findingSchema = z.object({
-	id: z.string(),
-	run_id: z.string(),
-	agent_id: z.string(),
-	severity: z.enum(["low", "medium", "high", "critical"]),
-	rule: z.string(),
-	message: z.string(),
-	action: z.enum(["flagged", "killed"]),
-	created_at: z.string(),
-});
-export type Finding = z.infer<typeof findingSchema>;

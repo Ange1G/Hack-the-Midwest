@@ -11,8 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppRouteImport } from './routes/_app'
-import { Route as LoginRouteImport } from './routes/login'
-import { Route as AppSecurityRouteImport } from './routes/_app/security'
 import { Route as AppAgentsIndexRouteImport } from './routes/_app/agents/index'
 import { Route as AppAgentsAgentIdRouteImport } from './routes/_app/agents/$agentId'
 import { Route as AppAgentsNewRouteImport } from './routes/_app/agents/new'
@@ -27,16 +25,6 @@ const IndexRoute = IndexRouteImport.update({
 const AppRoute = AppRouteImport.update({
   id: '/_app',
   getParentRoute: () => rootRouteImport,
-} as any)
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AppSecurityRoute = AppSecurityRouteImport.update({
-  id: '/security',
-  path: '/security',
-  getParentRoute: () => AppRoute,
 } as any)
 const AppAgentsIndexRoute = AppAgentsIndexRouteImport.update({
   id: '/agents/',
@@ -66,8 +54,6 @@ const AppAgentsAgentIdEditRoute = AppAgentsAgentIdEditRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/login': typeof LoginRoute
-  '/security': typeof AppSecurityRoute
   '/agents/$agentId': typeof AppAgentsAgentIdRoute
   '/agents/new': typeof AppAgentsNewRoute
   '/runs/$runId': typeof AppRunsRunIdRoute
@@ -76,8 +62,6 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/login': typeof LoginRoute
-  '/security': typeof AppSecurityRoute
   '/agents/$agentId': typeof AppAgentsAgentIdRoute
   '/agents/new': typeof AppAgentsNewRoute
   '/runs/$runId': typeof AppRunsRunIdRoute
@@ -88,8 +72,6 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_app': typeof AppRouteWithChildren
-  '/login': typeof LoginRoute
-  '/_app/security': typeof AppSecurityRoute
   '/_app/agents/$agentId': typeof AppAgentsAgentIdRoute
   '/_app/agents/new': typeof AppAgentsNewRoute
   '/_app/runs/$runId': typeof AppRunsRunIdRoute
@@ -100,8 +82,6 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/login'
-    | '/security'
     | '/agents/$agentId'
     | '/agents/new'
     | '/runs/$runId'
@@ -110,8 +90,6 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/login'
-    | '/security'
     | '/agents/$agentId'
     | '/agents/new'
     | '/runs/$runId'
@@ -121,8 +99,6 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/_app'
-    | '/login'
-    | '/_app/security'
     | '/_app/agents/$agentId'
     | '/_app/agents/new'
     | '/_app/runs/$runId'
@@ -133,7 +109,6 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRoute: typeof AppRouteWithChildren
-  LoginRoute: typeof LoginRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -151,20 +126,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
-    }
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_app/security': {
-      id: '/_app/security'
-      path: '/security'
-      fullPath: '/security'
-      preLoaderRoute: typeof AppSecurityRouteImport
-      parentRoute: typeof AppRoute
     }
     '/_app/agents/': {
       id: '/_app/agents/'
@@ -205,7 +166,6 @@ declare module '@tanstack/react-router' {
 }
 
 interface AppRouteChildren {
-  AppSecurityRoute: typeof AppSecurityRoute
   AppAgentsAgentIdRoute: typeof AppAgentsAgentIdRoute
   AppAgentsNewRoute: typeof AppAgentsNewRoute
   AppRunsRunIdRoute: typeof AppRunsRunIdRoute
@@ -214,7 +174,6 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
-  AppSecurityRoute: AppSecurityRoute,
   AppAgentsAgentIdRoute: AppAgentsAgentIdRoute,
   AppAgentsNewRoute: AppAgentsNewRoute,
   AppRunsRunIdRoute: AppRunsRunIdRoute,
@@ -227,7 +186,6 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRoute: AppRouteWithChildren,
-  LoginRoute: LoginRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

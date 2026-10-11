@@ -1,24 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { DEMO_USER_SSO } from "./demo-account";
+import { DEFAULT_DEV_USER_SSO } from "#/config/developer-contexts";
 import { seedDemoState } from "./seed";
 import { mockState } from "./state";
 
 describe("seedDemoState", () => {
-	it("seeds agents for the demo identity", () => {
+	it("seeds agents for the default developer identity", () => {
 		seedDemoState();
 
 		expect(mockState.agents.length).toBeGreaterThan(0);
 		expect(
-			mockState.agents.every((agent) => agent.owner_user_sso === DEMO_USER_SSO),
+			mockState.agents.every(
+				(agent) => agent.owner_user_sso === DEFAULT_DEV_USER_SSO,
+			),
 		).toBe(true);
 	});
 
-	it("seeds a succeeded run, a killed run with its finding, and a flagged agent", () => {
+	it("seeds a completed run so the run page has something to show", () => {
 		seedDemoState();
 
-		const statuses = mockState.runs.map((run) => run.status);
-		expect(statuses).toEqual(expect.arrayContaining(["succeeded", "killed"]));
-		expect(mockState.findings).toHaveLength(1);
-		expect(mockState.agents.some((agent) => agent.flagged)).toBe(true);
+		expect(mockState.runs.some((run) => run.status === "succeeded")).toBe(true);
+		expect(
+			mockState.agents.some((agent) => agent.last_run?.status === "succeeded"),
+		).toBe(true);
 	});
 });

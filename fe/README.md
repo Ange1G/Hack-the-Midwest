@@ -13,8 +13,8 @@ npm run dev
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Dev server on port 3000 against the real API (`VITE_API_URL`, default `http://localhost:8000/api/v1`). Sign in with the SSO id the API should trust (`X-Dev-User-SSO`). |
-| `npm run dev:mock` | Dev server against the in-browser mock API (Mock Service Worker). No backend needed. Any SSO id signs in; `admin` has demo data. |
+| `npm run dev` | Dev server on port 3000 against the real API (`VITE_API_URL`, default `http://localhost:8000/api/v1`). Every request carries the developer identity from `VITE_DEV_USER_SSO` (default `admin`) in the `X-Dev-User-SSO` header. |
+| `npm run dev:mock` | Dev server against the in-browser mock API (Mock Service Worker). No backend needed; the default identity `admin` has demo data. |
 | `npm test` | Vitest unit and integration tests (`npm run test:watch` to keep them running). |
 | `npm run test:e2e` | Playwright end-to-end tests against a mock-mode dev server on port 3100. |
 | `npm run typecheck` | TypeScript, no emit. |

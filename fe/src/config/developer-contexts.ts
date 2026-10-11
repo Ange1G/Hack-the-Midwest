@@ -1,9 +1,12 @@
-import type { User } from "#/lib/api/session";
+import type { User } from "#/lib/api/identity";
 
 export const APP_BRANDING = {
-	kicker: "Hack Midwest 2026",
 	productName: "Name TBD",
 } as const;
+
+// The identity the app presents when VITE_DEV_USER_SSO is not set. Mock mode
+// seeds its demo data for this id.
+export const DEFAULT_DEV_USER_SSO = "admin";
 
 export type AuthProvider = "password" | "google" | "github" | "sso";
 
@@ -27,7 +30,7 @@ type DeveloperContextPreset = {
 /** UI-only session display keyed by SSO id (lowercase). Not a security boundary. */
 export const DEVELOPER_CONTEXTS_BY_SSO: Record<string, DeveloperContextPreset> =
 	{
-		admin: {
+		[DEFAULT_DEV_USER_SSO]: {
 			displayName: "Demo Admin",
 			authProvider: "sso",
 			authProviderLabel: "Development SSO",
