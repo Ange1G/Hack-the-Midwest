@@ -1,6 +1,12 @@
 from fastapi import APIRouter
 
 from app.domains.agents.router import router as agents_router
+from app.domains.connectors.router import router as connectors_router
+from app.domains.primitives.router import router as connector_types_router
 
 api_v1_router = APIRouter()
 api_v1_router.include_router(agents_router, prefix="/agents", tags=["agents"])
+api_v1_router.include_router(connectors_router, prefix="/connectors", tags=["connectors"])
+api_v1_router.include_router(
+    connector_types_router, prefix="/connector-types", tags=["connectors"]
+)

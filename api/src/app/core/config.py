@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     max_page_size: int = 100
     # Fernet key for agent credentials. Unset: agents without credentials still work.
     secrets_encryption_key: SecretStr | None = None
+    # Docker network for provisioned databases. Unset: ports are published on 127.0.0.1
+    # (local development, platform code on the Docker host). Set: databases join this
+    # network (created as --internal if missing) and are reached by container name.
+    database_provisioner_network: str | None = None
+    # Seconds to wait for a provisioned database to accept connections.
+    database_provisioner_ready_timeout: int = 90
 
 
 @lru_cache

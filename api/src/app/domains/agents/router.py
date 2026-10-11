@@ -8,9 +8,9 @@ from app.domains.agents.controller import AgentsController
 from app.domains.agents.schemas import AgentRead
 from fastapi import status
 
-from app.api.deps import get_secret_cipher
-from app.core.secrets import SecretCipher
+from app.api.deps import get_connector_repository
 from app.domains.agents.schemas import AgentCreate
+from app.domains.connectors.repository import SqlAlchemyConnectorRepository
 
 router = APIRouter()
 
@@ -39,6 +39,6 @@ async def create_agent(
     body: AgentCreate,
     controller: AgentsController = Depends(get_agents_controller),
     caller: CurrentUser = Depends(get_current_user),
-    cipher: SecretCipher | None = Depends(get_secret_cipher),
+    connectors: SqlAlchemyConnectorRepository = Depends(get_connector_repository),
 ) -> ApiEnvelope[AgentRead]:
-    return await controller.create(user_sso, body, caller=caller, cipher=cipher)
+    return await controller.create(user_sso, body, caller=caller, connectors=connectors)
