@@ -10,11 +10,12 @@ const config = defineConfig({
 	resolve: { tsconfigPaths: true },
 	plugins: [
 		devtools(),
-		nitro({ rollupConfig: { external: [/^@sentry\//] } }),
 		tailwindcss(),
 		tanstackStart(),
 		viteReact(),
 		babel({ presets: [reactCompilerPreset()] }),
+		// tanstackStart must register the SSR environment before Nitro's dev worker uses it.
+		nitro({ rollupConfig: { external: [/^@sentry\//] } }),
 	],
 });
 
