@@ -1,8 +1,7 @@
 import type { User } from "#/lib/api/session";
 
 export const APP_BRANDING = {
-	kicker: "Hack Midwest 2026",
-	productName: "Name TBD",
+	productName: "Stragents",
 } as const;
 
 export type AuthProvider = "password" | "google" | "github" | "sso";

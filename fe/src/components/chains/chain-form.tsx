@@ -61,7 +61,7 @@ export function ChainForm() {
 
 	return (
 		<form
-			className="max-w-3xl space-y-6"
+			className="w-full space-y-6"
 			onSubmit={(event) => {
 				event.preventDefault();
 				const times = parseScheduleTimes(schedule.times);

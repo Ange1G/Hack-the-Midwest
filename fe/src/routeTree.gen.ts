@@ -21,6 +21,7 @@ import { Route as AppChainsIndexRouteImport } from './routes/_app/chains/index'
 import { Route as AppChainsChainIdRouteImport } from './routes/_app/chains/$chainId'
 import { Route as AppChainsNewRouteImport } from './routes/_app/chains/new'
 import { Route as AppConnectorsIndexRouteImport } from './routes/_app/connectors/index'
+import { Route as AppConnectorsConnectorIdRouteImport } from './routes/_app/connectors/$connectorId'
 import { Route as AppConnectorsNewRouteImport } from './routes/_app/connectors/new'
 import { Route as AppRunsRunIdRouteImport } from './routes/_app/runs/$runId'
 import { Route as AppWebhooksIndexRouteImport } from './routes/_app/webhooks/index'
@@ -85,6 +86,12 @@ const AppConnectorsIndexRoute = AppConnectorsIndexRouteImport.update({
   path: '/connectors/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppConnectorsConnectorIdRoute =
+  AppConnectorsConnectorIdRouteImport.update({
+    id: '/connectors/$connectorId',
+    path: '/connectors/$connectorId',
+    getParentRoute: () => AppRoute,
+  } as any)
 const AppConnectorsNewRoute = AppConnectorsNewRouteImport.update({
   id: '/connectors/new',
   path: '/connectors/new',
@@ -115,6 +122,7 @@ export interface FileRoutesByFullPath {
   '/chain-runs/$chainRunId': typeof AppChainRunsChainRunIdRoute
   '/chains/$chainId': typeof AppChainsChainIdRoute
   '/chains/new': typeof AppChainsNewRoute
+  '/connectors/$connectorId': typeof AppConnectorsConnectorIdRoute
   '/connectors/new': typeof AppConnectorsNewRoute
   '/runs/$runId': typeof AppRunsRunIdRoute
   '/agents/': typeof AppAgentsIndexRoute
@@ -132,6 +140,7 @@ export interface FileRoutesByTo {
   '/chain-runs/$chainRunId': typeof AppChainRunsChainRunIdRoute
   '/chains/$chainId': typeof AppChainsChainIdRoute
   '/chains/new': typeof AppChainsNewRoute
+  '/connectors/$connectorId': typeof AppConnectorsConnectorIdRoute
   '/connectors/new': typeof AppConnectorsNewRoute
   '/runs/$runId': typeof AppRunsRunIdRoute
   '/agents': typeof AppAgentsIndexRoute
@@ -151,6 +160,7 @@ export interface FileRoutesById {
   '/_app/chain-runs/$chainRunId': typeof AppChainRunsChainRunIdRoute
   '/_app/chains/$chainId': typeof AppChainsChainIdRoute
   '/_app/chains/new': typeof AppChainsNewRoute
+  '/_app/connectors/$connectorId': typeof AppConnectorsConnectorIdRoute
   '/_app/connectors/new': typeof AppConnectorsNewRoute
   '/_app/runs/$runId': typeof AppRunsRunIdRoute
   '/_app/agents/': typeof AppAgentsIndexRoute
@@ -170,6 +180,7 @@ export interface FileRouteTypes {
     | '/chain-runs/$chainRunId'
     | '/chains/$chainId'
     | '/chains/new'
+    | '/connectors/$connectorId'
     | '/connectors/new'
     | '/runs/$runId'
     | '/agents/'
@@ -187,6 +198,7 @@ export interface FileRouteTypes {
     | '/chain-runs/$chainRunId'
     | '/chains/$chainId'
     | '/chains/new'
+    | '/connectors/$connectorId'
     | '/connectors/new'
     | '/runs/$runId'
     | '/agents'
@@ -205,6 +217,7 @@ export interface FileRouteTypes {
     | '/_app/chain-runs/$chainRunId'
     | '/_app/chains/$chainId'
     | '/_app/chains/new'
+    | '/_app/connectors/$connectorId'
     | '/_app/connectors/new'
     | '/_app/runs/$runId'
     | '/_app/agents/'
@@ -306,6 +319,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppConnectorsIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/connectors/$connectorId': {
+      id: '/_app/connectors/$connectorId'
+      path: '/connectors/$connectorId'
+      fullPath: '/connectors/$connectorId'
+      preLoaderRoute: typeof AppConnectorsConnectorIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/connectors/new': {
       id: '/_app/connectors/new'
       path: '/connectors/new'
@@ -344,6 +364,7 @@ interface AppRouteChildren {
   AppChainRunsChainRunIdRoute: typeof AppChainRunsChainRunIdRoute
   AppChainsChainIdRoute: typeof AppChainsChainIdRoute
   AppChainsNewRoute: typeof AppChainsNewRoute
+  AppConnectorsConnectorIdRoute: typeof AppConnectorsConnectorIdRoute
   AppConnectorsNewRoute: typeof AppConnectorsNewRoute
   AppRunsRunIdRoute: typeof AppRunsRunIdRoute
   AppAgentsIndexRoute: typeof AppAgentsIndexRoute
@@ -360,6 +381,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppChainRunsChainRunIdRoute: AppChainRunsChainRunIdRoute,
   AppChainsChainIdRoute: AppChainsChainIdRoute,
   AppChainsNewRoute: AppChainsNewRoute,
+  AppConnectorsConnectorIdRoute: AppConnectorsConnectorIdRoute,
   AppConnectorsNewRoute: AppConnectorsNewRoute,
   AppRunsRunIdRoute: AppRunsRunIdRoute,
   AppAgentsIndexRoute: AppAgentsIndexRoute,

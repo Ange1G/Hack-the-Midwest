@@ -30,6 +30,9 @@ test("sign in, build an agent, run it, see an unsafe agent refused, then watch t
 	const firstSlot = page.getByRole("group", { name: "Connector 1" });
 	await firstSlot.getByLabel("Name", { exact: true }).fill("status");
 	await firstSlot.getByLabel("URL", { exact: true }).fill("https://status.example.com");
+	await firstSlot
+		.getByLabel("Query parameters the agent may set")
+		.fill("q");
 	await page.getByRole("button", { name: "Create agent" }).click();
 	await expect(
 		page.getByRole("heading", { name: "Uptime checker" }),
