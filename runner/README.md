@@ -24,7 +24,25 @@ docker build -t agent-platform-runner:local .
 | `DATABASE_TOOLS_JSON` | Database connector specs (engine, host, port, read_only). No passwords. |
 | `DATABASE_CREDENTIALS_JSON` | Map of connector id → `{ password, caCertificate? }`. Never in the manifest. |
 | `MCP_SERVERS_JSON` | MCP servers and allowlisted tool names. No credentials. |
-| `MCP_CREDENTIALS_JSON` | Map of connector id → header credentials. Never in the manifest. |
+| `MCP_CREDENTIALS_JSON` | Map of connector id → header credentials. Never in the manifest. Includes delegates' connectors. |
+| `RUN_CONTEXT_STDIN` | `1` when the worker writes a run context JSON document to stdin (`docker run -i`). |
+
+The run context carries data too large or too structured for env vars, and never
+credentials: `{knowledge_ids, knowledge: [{id, name, description, max_results,
+documents}], memory: {entries} | null, delegates: [{tool_name, agent_id, title,
+system_prompt, http_tools, mcp_servers, knowledge_ids}]}`. It is capped at 8 MB; an
+unreadable context fails the run with `run_context_invalid`.
+
+From it the runner adds:
+
+- `<name>__search` / `<name>__read` per knowledge connector (in-memory BM25).
+- `memory_list` / `memory_get` / `memory_set` / `memory_delete` when memory is on.
+  Writes are sent as `memory: {set, delete}` in the success callback only.
+- `ask_<agent>` per delegate: a nested Strands agent with only that delegate's tools.
+  At most 5 delegate calls per run; delegates cannot delegate or use memory.
+
+Every tool call is recorded in `result.tool_calls` with `kind`, `ok`,
+`duration_ms`, truncated `arguments`, and `delegate` when a delegate made it.
 
 The container must reach the API at `EXECUTION_CALLBACK_BASE_URL`
 (default `http://host.docker.internal:8000`). The worker passes

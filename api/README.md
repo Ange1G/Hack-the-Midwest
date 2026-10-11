@@ -76,7 +76,7 @@ uv run pytest
 
 ## Connectors
 
-Connectors are reusable primitives (an HTTP endpoint, an MCP server) owned by a user.
+Connectors are reusable primitives (an HTTP endpoint, an MCP server, a set of documents) owned by a user.
 Agents reference them by ID, so a credential is configured once and shared.
 
 Every connector follows the generic contract:
@@ -90,12 +90,38 @@ Every connector follows the generic contract:
 | `http` | `xApiKey`, `authorizationHeader` | `method` (GET/POST), `URL`, `payload`, optional `queryParams` / `bodyParams` |
 | `mcp` | `xApiKey`, `authorizationHeader` | `URL`, `transport` (`streamableHttp`) |
 | `notification` | `webhookUrl` (required), `xApiKey`, `authorizationHeader` | `bodyParams` (keys the agent fills, e.g. `text`), optional fixed `payload` object |
+| `knowledge` | none | `maxResults` (1-10, default 5) |
 
 Notification connectors POST JSON to one destination, such as a Slack incoming webhook.
 The destination URL is a credential because such URLs embed a token: it is encrypted,
 never returned, and the agent and run view only see its host. The agent gets a
 `<name>(body)` tool that accepts only the `bodyParams` keys
 (`spec/2026-10-11-notification-connector/`).
+
+Knowledge connectors hold documents you upload (plain text or Markdown, 100 KB each,
+50 documents and 1 MB per connector). Agents get `<name>__search(query)` and
+`<name>__read(document_id, offset)` tools
+(`spec/2026-10-11-knowledge-connector/`):
+
+```bash
+curl -s -X POST -H "X-Dev-User-SSO: sso-user-a" -H "Content-Type: application/json" \
+  "http://localhost:8000/api/v1/connectors/sso-user-a/<connector-id>/documents" \
+  -d '{"title": "Failover runbook", "body": "Promote the replica, then..."}'
+```
+
+### Integration catalog
+
+`GET /api/v1/integrations` lists ready-made connectors (Exa search and Agenty
+over MCP, AgentQL over REST). Installing one creates an ordinary connector with your
+key in its encrypted credentials (`spec/2026-10-11-integration-catalog/`):
+
+```bash
+curl -s -X POST -H "X-Dev-User-SSO: sso-user-a" -H "Content-Type: application/json" \
+  "http://localhost:8000/api/v1/integrations/sso-user-a/exa/install" \
+  -d '{"apiKey": "<exa key>"}'
+```
+
+`GET /api/v1/agent-templates` returns starting prompts and allowlists that use them.
 
 List connector types and their JSON Schemas: `GET /api/v1/connector-types`.
 
