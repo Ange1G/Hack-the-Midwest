@@ -6,7 +6,7 @@
 
 - Optional `POST .../executions` body `ExecutionCreate { input }` (max 20,000 chars; blank → null).
 - Nullable `agent_executions.input` column (Alembic `005_execution_input`).
-- Worker passes `RUN_INPUT` into the runner; `run_turn` uses it as the user message when non-empty.
+- Worker passes `RUN_INPUT_B64` (UTF-8 base64) into the runner; the runner falls back to legacy `RUN_INPUT`. `run_turn` uses it as the user message when non-empty.
 - GET execution returns `input`. Callback `result` does not echo it.
 
 ## Validation

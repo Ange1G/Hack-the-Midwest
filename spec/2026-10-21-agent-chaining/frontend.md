@@ -25,7 +25,7 @@ There is no `GET /chains/{user_sso}/{id}/runs` list. The chain detail "Runs this
 
 ## Mock
 
-MSW mirrors the backend: masked webhook secrets, execution input, chain CRUD, and orchestrator advance on execution completion (handoff prefix `Previous step output:\n`).
+MSW mirrors the backend: masked webhook secrets, execution input, chain CRUD, and orchestrator advance on execution completion (handoff prefix `Previous step output:\n`, plus tool `response_body` when present).
 
 ## Deferred
 

@@ -19,7 +19,7 @@
 
 ## 3. Docker env ([`docker_runner.py`](../../api/src/app/worker/docker_runner.py))
 
-- Add env vars parallel to HTTP: `DATABASE_TOOLS_JSON`, `DATABASE_CREDENTIALS_JSON` (names TBD, documented in api/README).
+- Add env vars parallel to HTTP: `DATABASE_TOOLS_JSON`, `DATABASE_CREDENTIALS_JSON` (documented in api/README).
 
 ## 4. Runner ([`runner/`](../../runner/))
 
