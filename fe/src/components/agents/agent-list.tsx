@@ -35,6 +35,7 @@ import {
 	isActiveRunStatus,
 	useAgents,
 	useConnectors,
+	useDeleteAgent,
 	useExecutions,
 	useStartRun,
 } from "#/lib/api/queries";
@@ -84,8 +85,22 @@ const announceStopUnavailable = () =>
 		description: "The run will finish or time out on its own.",
 	});
 
-const announceDeleteUnavailable = () =>
-	notify.info("Deleting agents is not available yet");
+// One delete mutation shared by cards and table rows.
+function useAgentDeleteAction() {
+	const deleteAgent = useDeleteAgent();
+
+	const remove = (agent: Agent) =>
+		deleteAgent.mutate(agent.id, {
+			onSuccess: () =>
+				notify.success("Agent deleted", { description: agent.title }),
+			onError: (error) => notify.error("Could not delete the agent", error),
+		});
+
+	const isDeleting = (agent: Agent) =>
+		deleteAgent.isPending && deleteAgent.variables === agent.id;
+
+	return { remove, isDeleting };
+}
 
 // One start mutation shared by cards and table rows, so a run started from
 // either place shows as pending in both.
@@ -118,12 +133,14 @@ function useAgentRunAction() {
 }
 
 type RunAction = ReturnType<typeof useAgentRunAction>;
+type DeleteAction = ReturnType<typeof useAgentDeleteAction>;
 
 export function AgentList() {
 	const agents = useAgents();
 	const connectors = useConnectors();
 	const executions = useExecutions();
 	const runAction = useAgentRunAction();
+	const deleteAction = useAgentDeleteAction();
 
 	if (agents.isPending) {
 		return <LoadingState label="Loading agents…" />;
@@ -175,6 +192,7 @@ export function AgentList() {
 						connectors={connectorItems}
 						executions={executionItems}
 						runAction={runAction}
+						deleteAction={deleteAction}
 					/>
 				</CardGridItem>
 			))}
@@ -208,6 +226,7 @@ export function AgentList() {
 					connectors={connectorItems}
 					executions={executionItems}
 					runAction={runAction}
+					deleteAction={deleteAction}
 				/>
 				{pagination && pagination.total_items > items.length ? (
 					<p className="text-sm text-muted-foreground">
@@ -267,11 +286,13 @@ function AgentCard({
 	connectors,
 	executions,
 	runAction,
+	deleteAction,
 }: {
 	agent: Agent;
 	connectors: Connector[];
 	executions: Execution[];
 	runAction: RunAction;
+	deleteAction: DeleteAction;
 }) {
 	const last = lastRunFor(agent, executions);
 	const chips = connectorChipsForAgent(agent, connectors);
@@ -305,7 +326,9 @@ function AgentCard({
 						label={`Delete ${agent.title}`}
 						icon={<Trash2Icon className="size-4" />}
 						destructive
-						onClick={announceDeleteUnavailable}
+						disabled={isRunning(agent, executions) || runAction.isStarting(agent)}
+						pending={deleteAction.isDeleting(agent)}
+						onClick={() => deleteAction.remove(agent)}
 					/>
 				</ResourceCardActions>
 			</ResourceCardHeader>
@@ -355,11 +378,13 @@ function AgentListTable({
 	connectors,
 	executions,
 	runAction,
+	deleteAction,
 }: {
 	items: Agent[];
 	connectors: Connector[];
 	executions: Execution[];
 	runAction: RunAction;
+	deleteAction: DeleteAction;
 }) {
 	const navigate = useNavigate();
 
@@ -465,9 +490,10 @@ function AgentListTable({
 						<DataTableActionButton
 							label="Delete"
 							icon={<Trash2Icon className="size-4" />}
-							disabled={starting}
+							disabled={starting || isRunning(agent, executions)}
+							pending={deleteAction.isDeleting(agent)}
 							destructive
-							onClick={announceDeleteUnavailable}
+							onClick={() => deleteAction.remove(agent)}
 						/>
 					</DataTableActionsCell>
 				);

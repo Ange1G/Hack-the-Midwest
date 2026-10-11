@@ -236,6 +236,21 @@ export function useUpdateAgent() {
 	});
 }
 
+export function useDeleteAgent() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (agentId: string) => {
+			const user = requireUser();
+			return api.delete(`${agentsPath(user.user_sso)}/${agentId}`);
+		},
+		onSuccess: (_data, agentId) => {
+			void queryClient.invalidateQueries({ queryKey: queryKeys.agents });
+			queryClient.removeQueries({ queryKey: queryKeys.agent(agentId) });
+			queryClient.removeQueries({ queryKey: queryKeys.agentMemory(agentId) });
+		},
+	});
+}
+
 // Agent memory
 
 export function useAgentMemory(agentId: string, enabled = true) {
