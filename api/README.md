@@ -183,6 +183,29 @@ See `spec/2026-10-10-strands-openai-runner/` and `spec/2026-10-10-agent-executio
 
 Owners may have at most `MAX_ACTIVE_EXECUTIONS_PER_OWNER` queued or running jobs (default 5).
 
+### TLS interception (corporate networks / Zscaler / Netskope)
+
+On hosts where Docker containers cannot reach external HTTPS endpoints due to a corporate
+TLS proxy, generate a PEM bundle from the macOS keychain and point the worker at it:
+
+```bash
+security find-certificate -a -p \
+  /System/Library/Keychains/SystemRootCertificates.keychain \
+  /Library/Keychains/System.keychain > ~/mac-ca.pem
+```
+
+Add to `api/.env`:
+
+```
+EXECUTION_SSL_CA_BUNDLE=/Users/yourname/mac-ca.pem
+```
+
+The worker mounts the file read-only into every execution container at
+`/tmp/ca-bundle.pem` and sets `SSL_CERT_FILE` so Python/httpx uses it.
+Leave `EXECUTION_SSL_CA_BUNDLE` unset on standard production hosts where
+public CA chains are sufficient. See `spec/2026-10-10-ssl-ca-bundle/` for
+full rationale and the production setup guide.
+
 ## Agent flow (copy-paste)
 
 1. Create an HTTP connector (optional credentials encrypted at rest).
