@@ -4,8 +4,8 @@ from app.common.pagination import total_pages as compute_total_pages
 from app.core.config import Settings
 from app.core.request_context import request_id_ctx
 from app.domains.agents.schemas import AgentRead
-from app.core.secrets import SecretCipher
 from app.domains.agents.schemas import AgentCreate
+from app.domains.agents.service import ConnectorLookup
 from app.domains.agents.service import AgentService
 
 
@@ -53,9 +53,11 @@ class AgentsController:
         body: AgentCreate,
         *,
         caller: CurrentUser,
-        cipher: SecretCipher | None,
+        connectors: ConnectorLookup,
     ) -> ApiEnvelope[AgentRead]:
-        agent = await self._service.create_agent(user_sso, body, caller=caller, cipher=cipher)
+        agent = await self._service.create_agent(
+            user_sso, body, caller=caller, connectors=connectors
+        )
         return ApiEnvelope[AgentRead](
             data=agent,
             error=None,

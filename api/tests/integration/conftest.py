@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.database import Base, get_engine, get_session_factory, reset_database_state
 from app.domains.agents.models import Agent
+from app.domains.connectors.models import Connector
 from app.main import create_app
 
 
@@ -75,3 +76,19 @@ async def seeded_agents(db_session: AsyncSession) -> dict[str, list[Agent]]:
     for agent in agents_a + agents_b:
         await db_session.refresh(agent)
     return {owner_a: agents_a, owner_b: agents_b}
+
+
+@pytest.fixture(autouse=True)
+async def _clean_connectors(
+    _configure_test_env: None, database_harness: None
+) -> AsyncGenerator[None]:
+    """Connectors are unique per owner and name, so each test starts without any.
+
+    Depends on _configure_test_env explicitly so the per-test engine reset runs first;
+    otherwise this fixture would reuse an engine bound to the previous test's loop.
+    """
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        await session.execute(delete(Connector))
+        await session.commit()
+    yield
