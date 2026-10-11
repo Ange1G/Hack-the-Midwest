@@ -10,33 +10,130 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppRouteImport } from './routes/_app'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as AppSecurityRouteImport } from './routes/_app/security'
+import { Route as AppAgentsIndexRouteImport } from './routes/_app/agents/index'
+import { Route as AppAgentsAgentIdRouteImport } from './routes/_app/agents/$agentId'
+import { Route as AppAgentsNewRouteImport } from './routes/_app/agents/new'
+import { Route as AppRunsRunIdRouteImport } from './routes/_app/runs/$runId'
+import { Route as AppAgentsAgentIdEditRouteImport } from './routes/_app/agents/$agentId_.edit'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppSecurityRoute = AppSecurityRouteImport.update({
+  id: '/security',
+  path: '/security',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAgentsIndexRoute = AppAgentsIndexRouteImport.update({
+  id: '/agents/',
+  path: '/agents/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAgentsAgentIdRoute = AppAgentsAgentIdRouteImport.update({
+  id: '/agents/$agentId',
+  path: '/agents/$agentId',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAgentsNewRoute = AppAgentsNewRouteImport.update({
+  id: '/agents/new',
+  path: '/agents/new',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppRunsRunIdRoute = AppRunsRunIdRouteImport.update({
+  id: '/runs/$runId',
+  path: '/runs/$runId',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAgentsAgentIdEditRoute = AppAgentsAgentIdEditRouteImport.update({
+  id: '/agents/$agentId_/edit',
+  path: '/agents/$agentId/edit',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
+  '/security': typeof AppSecurityRoute
+  '/agents/$agentId': typeof AppAgentsAgentIdRoute
+  '/agents/new': typeof AppAgentsNewRoute
+  '/runs/$runId': typeof AppRunsRunIdRoute
+  '/agents/': typeof AppAgentsIndexRoute
+  '/agents/$agentId/edit': typeof AppAgentsAgentIdEditRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
+  '/security': typeof AppSecurityRoute
+  '/agents/$agentId': typeof AppAgentsAgentIdRoute
+  '/agents/new': typeof AppAgentsNewRoute
+  '/runs/$runId': typeof AppRunsRunIdRoute
+  '/agents': typeof AppAgentsIndexRoute
+  '/agents/$agentId/edit': typeof AppAgentsAgentIdEditRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/_app': typeof AppRouteWithChildren
+  '/login': typeof LoginRoute
+  '/_app/security': typeof AppSecurityRoute
+  '/_app/agents/$agentId': typeof AppAgentsAgentIdRoute
+  '/_app/agents/new': typeof AppAgentsNewRoute
+  '/_app/runs/$runId': typeof AppRunsRunIdRoute
+  '/_app/agents/': typeof AppAgentsIndexRoute
+  '/_app/agents/$agentId_/edit': typeof AppAgentsAgentIdEditRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/security'
+    | '/agents/$agentId'
+    | '/agents/new'
+    | '/runs/$runId'
+    | '/agents/'
+    | '/agents/$agentId/edit'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/login'
+    | '/security'
+    | '/agents/$agentId'
+    | '/agents/new'
+    | '/runs/$runId'
+    | '/agents'
+    | '/agents/$agentId/edit'
+  id:
+    | '__root__'
+    | '/'
+    | '/_app'
+    | '/login'
+    | '/_app/security'
+    | '/_app/agents/$agentId'
+    | '/_app/agents/new'
+    | '/_app/runs/$runId'
+    | '/_app/agents/'
+    | '/_app/agents/$agentId_/edit'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AppRoute: typeof AppRouteWithChildren
+  LoginRoute: typeof LoginRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,12 +145,99 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app': {
+      id: '/_app'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app/security': {
+      id: '/_app/security'
+      path: '/security'
+      fullPath: '/security'
+      preLoaderRoute: typeof AppSecurityRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/agents/': {
+      id: '/_app/agents/'
+      path: '/agents'
+      fullPath: '/agents/'
+      preLoaderRoute: typeof AppAgentsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/agents/$agentId': {
+      id: '/_app/agents/$agentId'
+      path: '/agents/$agentId'
+      fullPath: '/agents/$agentId'
+      preLoaderRoute: typeof AppAgentsAgentIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/agents/new': {
+      id: '/_app/agents/new'
+      path: '/agents/new'
+      fullPath: '/agents/new'
+      preLoaderRoute: typeof AppAgentsNewRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/runs/$runId': {
+      id: '/_app/runs/$runId'
+      path: '/runs/$runId'
+      fullPath: '/runs/$runId'
+      preLoaderRoute: typeof AppRunsRunIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/agents/$agentId_/edit': {
+      id: '/_app/agents/$agentId_/edit'
+      path: '/agents/$agentId/edit'
+      fullPath: '/agents/$agentId/edit'
+      preLoaderRoute: typeof AppAgentsAgentIdEditRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
+interface AppRouteChildren {
+  AppSecurityRoute: typeof AppSecurityRoute
+  AppAgentsAgentIdRoute: typeof AppAgentsAgentIdRoute
+  AppAgentsNewRoute: typeof AppAgentsNewRoute
+  AppRunsRunIdRoute: typeof AppRunsRunIdRoute
+  AppAgentsIndexRoute: typeof AppAgentsIndexRoute
+  AppAgentsAgentIdEditRoute: typeof AppAgentsAgentIdEditRoute
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppSecurityRoute: AppSecurityRoute,
+  AppAgentsAgentIdRoute: AppAgentsAgentIdRoute,
+  AppAgentsNewRoute: AppAgentsNewRoute,
+  AppRunsRunIdRoute: AppRunsRunIdRoute,
+  AppAgentsIndexRoute: AppAgentsIndexRoute,
+  AppAgentsAgentIdEditRoute: AppAgentsAgentIdEditRoute,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AppRoute: AppRouteWithChildren,
+  LoginRoute: LoginRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { createStart } from '@tanstack/react-start'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+  }
+}

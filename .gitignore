@@ -1,0 +1,35 @@
+# secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# test artifacts
+test-results/
+playwright-report/
+coverage/
+
+# logs
+*.log
+.cursor
