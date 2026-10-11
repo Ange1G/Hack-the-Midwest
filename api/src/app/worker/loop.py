@@ -80,6 +80,7 @@ async def process_once(
         openai_model=settings.openai_model,
         http_tools=claimed.http_tools,
         http_credentials=claimed.http_credentials or None,
+        ssl_ca_bundle=settings.execution_ssl_ca_bundle or None,
     )
     try:
         outcome = await runner.run(request)

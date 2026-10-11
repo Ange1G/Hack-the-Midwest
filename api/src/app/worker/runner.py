@@ -17,6 +17,12 @@ class RunRequest:
     openai_model: str = "gpt-4o-mini"
     http_tools: list[dict[str, Any]] | None = None
     http_credentials: dict[str, dict[str, str]] | None = None
+    # Absolute path on the **host** to a PEM CA bundle. When set the worker
+    # volume-mounts it into every execution container and sets SSL_CERT_FILE so
+    # Python/httpx uses it. Required on hosts that perform TLS interception
+    # (e.g. Zscaler / Netskope) or that have private CA roots. Leave empty in
+    # production environments with standard public-CA chains.
+    ssl_ca_bundle: str | None = None
 
 
 @dataclass(frozen=True)

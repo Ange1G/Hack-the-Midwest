@@ -25,6 +25,16 @@ def docker_run_command(request: RunRequest) -> list[str]:
         env.append(f"HTTP_TOOLS_JSON={json.dumps(request.http_tools)}")
     if request.http_credentials:
         env.append(f"HTTP_CREDENTIALS_JSON={json.dumps(request.http_credentials)}")
+    # When a CA bundle is configured on the host, mount it read-only into the
+    # container at a fixed path and tell Python/httpx to use it via SSL_CERT_FILE.
+    # This is needed on hosts that perform TLS interception or that have private
+    # CA roots not present in the base image (e.g. Zscaler, Netskope, corp PKI).
+    # In production without TLS inspection, leave EXECUTION_SSL_CA_BUNDLE unset.
+    _ca_bundle_container_path = "/tmp/ca-bundle.pem"
+    volume_args: list[str] = []
+    if request.ssl_ca_bundle:
+        env.append(f"SSL_CERT_FILE={_ca_bundle_container_path}")
+        volume_args = ["-v", f"{request.ssl_ca_bundle}:{_ca_bundle_container_path}:ro"]
     command = [
         "docker",
         "run",
@@ -45,6 +55,7 @@ def docker_run_command(request: RunRequest) -> list[str]:
         "--add-host",
         "host.docker.internal:host-gateway",
     ]
+    command.extend(volume_args)
     for item in env:
         command.extend(["-e", item])
     command.append(request.image)

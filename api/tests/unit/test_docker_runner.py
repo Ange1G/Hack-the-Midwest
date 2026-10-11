@@ -67,3 +67,48 @@ def test_docker_command_omits_openai_key_when_missing() -> None:
         )
     )
     assert not any(item.startswith("OPENAI_API_KEY=") for item in cmd)
+
+
+def test_docker_command_mounts_ssl_ca_bundle_when_set() -> None:
+    bundle_path = "/home/user/mac-ca.pem"
+    cmd = docker_run_command(
+        RunRequest(
+            execution_id=uuid.uuid4(),
+            agent_id=uuid.uuid4(),
+            owner_user_sso="sso-me",
+            callback_url="http://example.test/complete",
+            callback_token="tok",
+            agent_manifest={"title": "A"},
+            timeout_seconds=30,
+            image="agent-platform-runner:local",
+            ssl_ca_bundle=bundle_path,
+        )
+    )
+    joined = " ".join(cmd)
+    # Volume mount present
+    assert "-v" in cmd
+    mount_idx = cmd.index("-v")
+    assert cmd[mount_idx + 1] == f"{bundle_path}:/tmp/ca-bundle.pem:ro"
+    # SSL_CERT_FILE env var injected
+    assert "SSL_CERT_FILE=/tmp/ca-bundle.pem" in cmd
+    # Image is still last
+    assert cmd[-1] == "agent-platform-runner:local"
+    # Bundle path does not appear as a secret in env positions
+    assert joined.count(bundle_path) == 1  # only in the -v flag, not duplicated
+
+
+def test_docker_command_no_ssl_ca_bundle_by_default() -> None:
+    cmd = docker_run_command(
+        RunRequest(
+            execution_id=uuid.uuid4(),
+            agent_id=uuid.uuid4(),
+            owner_user_sso="sso-me",
+            callback_url="http://example.test/complete",
+            callback_token="tok",
+            agent_manifest={"title": "A"},
+            timeout_seconds=30,
+            image="agent-platform-runner:local",
+        )
+    )
+    assert "-v" not in cmd
+    assert not any(item.startswith("SSL_CERT_FILE=") for item in cmd)

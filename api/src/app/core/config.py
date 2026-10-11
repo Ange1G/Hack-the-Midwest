@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-4o-mini"
     max_active_executions_per_owner: int = 5
+    # Absolute path on the worker host to a PEM CA bundle that is volume-mounted
+    # into every execution container. Set this when the host performs TLS inspection
+    # (e.g. Zscaler / Netskope) or uses private CA roots not in the runner image.
+    # Leave unset in standard production environments.
+    execution_ssl_ca_bundle: str | None = None
 
 
 @lru_cache
