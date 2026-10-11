@@ -1,26 +1,37 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { FileTextIcon, PauseIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import {
+	ArrowLeftIcon,
+	ArrowUpRightIcon,
+	Loader2Icon,
+	PanelRightOpenIcon,
+	PlayIcon,
+	SettingsIcon,
+} from "lucide-react";
+import { type ReactNode, useEffect, useId, useState } from "react";
 import { DataTable, type DataTableColumn } from "#/components/data-table";
 import {
 	DataTableActionButton,
 	DataTableActionsCell,
 } from "#/components/data-table-action-button";
-import { PageHeader } from "#/components/layout/page";
+import { PageHeader, Section } from "#/components/layout/page";
 import { Notice } from "#/components/notice";
+import { RelativeTime } from "#/components/relative-time";
+import { RunDetails } from "#/components/runs/run-details";
 import { EmptyState, ErrorState, LoadingState } from "#/components/states";
 import { StatusBadge } from "#/components/status-badge";
 import { ToneBadge } from "#/components/tone-badge";
 import { Button } from "#/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "#/components/ui/card";
 import { Label } from "#/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { Textarea } from "#/components/ui/textarea";
 import {
 	isActiveRunStatus,
+	queryKeys,
 	useAgent,
 	useAgentRuns,
 	useConnectors,
+	useRun,
 	useStartRun,
 } from "#/lib/api/queries";
 import type {
@@ -34,14 +45,12 @@ import {
 	connectorLabel,
 	httpContractFromConnector,
 } from "#/lib/api/schemas";
+import { notify } from "#/lib/feedback";
 import { formatDateTime, formatDuration } from "#/lib/format";
 import { minutesToTime } from "#/lib/http-contract";
-import { textLinkClass } from "#/lib/styles";
-
-// shadcn renders an inactive tab at 60% of --foreground, which is 4.1:1 on the
-// muted tab background with this palette; 80% keeps the resting state visibly
-// quieter while clearing the WCAG AA 4.5:1 ratio.
-const tabTriggerClass = "data-[state=inactive]:text-foreground/80";
+import { useFadeUp } from "#/lib/motion";
+import { watchRun } from "#/lib/run-watch";
+import { backLinkClass, textLinkClass } from "#/lib/styles";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_LABELS = [
@@ -61,15 +70,24 @@ const MONTH_LABELS = [
 
 export function AgentDetail({
 	agentId,
-	onRunStarted,
+	runId,
+	onRunChange,
+	pollIntervalMs,
 }: {
 	agentId: string;
-	onRunStarted: (run: Run) => void;
+	// The run shown in the panel; defaults to the most recent run.
+	runId?: string;
+	onRunChange?: (runId: string) => void;
+	pollIntervalMs?: number;
 }) {
 	const agent = useAgent(agentId);
 	const connectors = useConnectors();
-	const startRun = useStartRun(agentId);
-	const [runInput, setRunInput] = useState("");
+	const runs = useAgentRuns(agentId);
+	const [selectedRunId, setSelectedRunId] = useState(runId);
+
+	useEffect(() => {
+		if (runId) setSelectedRunId(runId);
+	}, [runId]);
 
 	if (agent.isPending) {
 		return <LoadingState label="Loading agent…" />;
@@ -95,35 +113,33 @@ export function AgentDetail({
 			return [{ id, connector, reference }];
 		},
 	);
+	const shownRunId = selectedRunId ?? runs.data?.[0]?.id;
+	const selectRun = (id: string) => {
+		setSelectedRunId(id);
+		onRunChange?.(id);
+	};
 
 	return (
 		<>
 			<PageHeader
 				title={data.title}
+				eyebrow={
+					<Link to="/agents" className={backLinkClass}>
+						<ArrowLeftIcon className="size-3.5" aria-hidden="true" />
+						Agents
+					</Link>
+				}
+				meta={
+					data.flagged ? <ToneBadge tone="danger">Flagged</ToneBadge> : null
+				}
 				description={`Created ${formatDateTime(data.created_at)}`}
 				action={
-					<div className="flex w-full max-w-sm flex-col gap-2">
-						<Label htmlFor="run-input">Run input (optional)</Label>
-						<Textarea
-							id="run-input"
-							value={runInput}
-							onChange={(event) => setRunInput(event.target.value)}
-							placeholder="Passed to the agent as this run's user message"
-							rows={3}
-						/>
-						<Button
-							type="button"
-							disabled={startRun.isPending}
-							onClick={() =>
-								startRun.mutate(
-									{ input: runInput },
-									{ onSuccess: (run) => onRunStarted(run) },
-								)
-							}
-						>
-							{startRun.isPending ? "Starting…" : "Run agent"}
-						</Button>
-					</div>
+					<Button variant="outline" size="sm" asChild>
+						<Link to="/agents/$agentId/edit" params={{ agentId }}>
+							<SettingsIcon aria-hidden="true" />
+							Edit
+						</Link>
+					</Button>
 				}
 			/>
 
@@ -143,69 +159,218 @@ export function AgentDetail({
 				</Notice>
 			) : null}
 
-			{startRun.error ? (
-				<Notice tone="danger" className="mb-4" title="Could not start the run">
-					<p>{startRun.error.message}</p>
-				</Notice>
-			) : null}
+			<div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_26rem]">
+				<div className="min-w-0 xl:sticky xl:top-6 xl:order-2">
+					<RunPanel
+						agentId={agentId}
+						agentTitle={data.title}
+						runId={shownRunId}
+						onRunStarted={selectRun}
+						pollIntervalMs={pollIntervalMs}
+					/>
+				</div>
 
-			<Tabs defaultValue="overview">
-				<TabsList>
-					<TabsTrigger value="overview" className={tabTriggerClass}>
-						Overview
-					</TabsTrigger>
-					<TabsTrigger value="runs" className={tabTriggerClass}>
-						Runs
-					</TabsTrigger>
-				</TabsList>
-				<TabsContent value="overview" className="mt-4 space-y-6">
-					<Card className="island-shell">
-						<CardHeader>
-							<CardTitle>Instructions</CardTitle>
-						</CardHeader>
-						<CardContent>
-							<p className="whitespace-pre-wrap text-sm">
-								{data.system_prompt}
+				<div className="min-w-0 space-y-6 xl:order-1">
+					<Section title="Instructions">
+						<p className="text-sm leading-relaxed whitespace-pre-wrap">
+							{data.system_prompt}
+						</p>
+					</Section>
+
+					<Section
+						title="Connectors"
+						description={`${attachments.length} attached`}
+						contentClassName="p-0"
+					>
+						{attachments.length === 0 ? (
+							<p className="p-4 text-sm text-muted-foreground">
+								This agent has no connectors.
 							</p>
-						</CardContent>
-					</Card>
-					<Card className="island-shell">
-						<CardHeader>
-							<CardTitle>Connectors</CardTitle>
-						</CardHeader>
-						<CardContent>
-							{attachments.length === 0 ? (
-								<p className="text-sm text-muted-foreground">
-									This agent has no connectors.
-								</p>
-							) : (
-								<ul className="space-y-4">
-									{attachments.map((item) => (
-										<li key={item.id}>
-											<ConnectorSummary
-												connector={item.connector}
-												allowedTools={item.reference.allowedTools}
-											/>
-										</li>
-									))}
-								</ul>
-							)}
-						</CardContent>
-					</Card>
-					<Card className="island-shell">
-						<CardHeader>
-							<CardTitle>Schedule</CardTitle>
-						</CardHeader>
-						<CardContent>
-							<ScheduleSummary configurations={data.configurations} />
-						</CardContent>
-					</Card>
-				</TabsContent>
-				<TabsContent value="runs" className="mt-4">
-					<AgentRuns agentId={agentId} />
-				</TabsContent>
-			</Tabs>
+						) : (
+							<ul className="divide-y">
+								{attachments.map((item) => (
+									<li key={item.id} className="px-4 py-3">
+										<ConnectorSummary
+											connector={item.connector}
+											allowedTools={item.reference.allowedTools}
+										/>
+									</li>
+								))}
+							</ul>
+						)}
+					</Section>
+
+					<Section title="Schedule">
+						<ScheduleSummary configurations={data.configurations} />
+					</Section>
+
+					<AgentRuns
+						runs={runs}
+						selectedRunId={shownRunId}
+						onSelect={selectRun}
+					/>
+				</div>
+			</div>
 		</>
+	);
+}
+
+function RunPanel({
+	agentId,
+	agentTitle,
+	runId,
+	onRunStarted,
+	pollIntervalMs,
+}: {
+	agentId: string;
+	agentTitle: string;
+	runId: string | undefined;
+	onRunStarted: (runId: string) => void;
+	pollIntervalMs?: number;
+}) {
+	const startRun = useStartRun(agentId);
+	const [runInput, setRunInput] = useState("");
+	const fadeUp = useFadeUp();
+	const hintId = useId();
+
+	const start = () => {
+		if (startRun.isPending) return;
+		startRun.mutate(
+			{ input: runInput },
+			{
+				onSuccess: (run) => {
+					setRunInput("");
+					onRunStarted(run.id);
+					notify.success("Run started", { description: agentTitle });
+				},
+				onError: (error) => notify.error("Could not start the run", error),
+			},
+		);
+	};
+
+	return (
+		<section
+			aria-label="Run panel"
+			className="overflow-hidden rounded-lg border bg-card"
+		>
+			<form
+				className="space-y-2 border-b p-4"
+				onSubmit={(event) => {
+					event.preventDefault();
+					start();
+				}}
+			>
+				<Label htmlFor="run-input">Run input (optional)</Label>
+				<Textarea
+					id="run-input"
+					value={runInput}
+					onChange={(event) => setRunInput(event.target.value)}
+					onKeyDown={(event) => {
+						if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+							event.preventDefault();
+							start();
+						}
+					}}
+					placeholder="Passed to the agent as this run's user message"
+					aria-describedby={hintId}
+					rows={3}
+					className="resize-none"
+				/>
+				<div className="flex items-center justify-between gap-2">
+					<p id={hintId} className="text-xs text-muted-foreground">
+						<kbd className="font-sans">Ctrl</kbd> /{" "}
+						<kbd className="font-sans">⌘</kbd> +{" "}
+						<kbd className="font-sans">Enter</kbd> to run
+					</p>
+					<Button type="submit" size="sm" disabled={startRun.isPending}>
+						{startRun.isPending ? (
+							<Loader2Icon className="animate-spin" aria-hidden="true" />
+						) : (
+							<PlayIcon aria-hidden="true" />
+						)}
+						{startRun.isPending ? "Starting…" : "Run agent"}
+					</Button>
+				</div>
+				{startRun.error ? (
+					<Notice tone="danger" title="Could not start the run">
+						<p>{startRun.error.message}</p>
+					</Notice>
+				) : null}
+			</form>
+
+			<div className="p-4">
+				<AnimatePresence mode="wait" initial={false}>
+					<motion.div
+						key={runId ?? "none"}
+						variants={fadeUp}
+						initial="hidden"
+						animate="visible"
+						exit="exit"
+					>
+						{runId ? (
+							<PanelRun runId={runId} pollIntervalMs={pollIntervalMs} />
+						) : (
+							<p className="py-6 text-center text-sm text-muted-foreground">
+								No runs yet. Start one and its output appears here.
+							</p>
+						)}
+					</motion.div>
+				</AnimatePresence>
+			</div>
+		</section>
+	);
+}
+
+function PanelRun({
+	runId,
+	pollIntervalMs,
+}: {
+	runId: string;
+	pollIntervalMs?: number;
+}) {
+	const queryClient = useQueryClient();
+	const run = useRun(runId, { pollIntervalMs });
+	const data = run.data;
+
+	useEffect(() => {
+		if (!data) return;
+		if (isActiveRunStatus(data.status)) watchRun(data.id);
+		// Keep the history table's row in step with the polled run.
+		queryClient.setQueryData<Run[]>(
+			queryKeys.agentRuns(data.agent_id),
+			(list) => list?.map((item) => (item.id === data.id ? data : item)),
+		);
+	}, [data, queryClient]);
+
+	if (run.isPending) {
+		return (
+			<p className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+				<Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+				Loading run…
+			</p>
+		);
+	}
+	if (run.isError) {
+		return (
+			<ErrorState
+				title="Could not load run"
+				error={run.error}
+				onRetry={() => void run.refetch()}
+			/>
+		);
+	}
+	return (
+		<RunDetails
+			run={run.data}
+			actions={
+				<Button variant="ghost" size="xs" asChild>
+					<Link to="/runs/$runId" params={{ runId }}>
+						Open
+						<ArrowUpRightIcon aria-hidden="true" />
+					</Link>
+				</Button>
+			}
+		/>
 	);
 }
 
@@ -222,10 +387,7 @@ function ConnectorSummary({
 	}
 	const config = connectorConfigRecord(connector);
 	return (
-		<fieldset className="space-y-2 rounded-lg border border-(--line) p-3">
-			<legend className="px-1 font-mono text-sm font-medium">
-				{connector.name}
-			</legend>
+		<ConnectorRow name={connector.name}>
 			<div className="flex flex-wrap items-center gap-2 text-sm">
 				<ToneBadge tone="info">{connectorLabel(connector.type)}</ToneBadge>
 				{typeof config.URL === "string" ? (
@@ -242,11 +404,28 @@ function ConnectorSummary({
 				) : null}
 			</div>
 			{allowedTools && allowedTools.length > 0 ? (
-				<p className="text-sm">
-					<span className="text-muted-foreground">Allowed tools: </span>
-					{allowedTools.join(", ")}
+				<p className="text-xs text-muted-foreground">
+					Allowed tools:{" "}
+					<span className="font-mono text-foreground">
+						{allowedTools.join(", ")}
+					</span>
 				</p>
 			) : null}
+		</ConnectorRow>
+	);
+}
+
+function ConnectorRow({
+	name,
+	children,
+}: {
+	name: string;
+	children: ReactNode;
+}) {
+	return (
+		<fieldset className="min-w-0 space-y-2">
+			<legend className="mb-2 font-mono text-sm font-medium">{name}</legend>
+			{children}
 		</fieldset>
 	);
 }
@@ -258,7 +437,12 @@ function CallSummary({
 	name: string;
 	contract: HttpContract;
 }) {
-	const details: string[] = [];
+	const details: string[] = [
+		contract.xApiKey ? "API key: configured" : "API key: none",
+		contract.authorizationHeader
+			? "Authorization header: configured"
+			: "Authorization header: none",
+	];
 	if (contract.options?.retries != null) {
 		details.push(`${contract.options.retries} retries`);
 	}
@@ -266,8 +450,7 @@ function CallSummary({
 		details.push(`${contract.options.timeout} ms timeout`);
 	}
 	return (
-		<fieldset className="space-y-2 rounded-lg border border-(--line) p-3">
-			<legend className="px-1 font-mono text-sm font-medium">{name}</legend>
+		<ConnectorRow name={name}>
 			<div className="flex flex-wrap items-center gap-2 text-sm">
 				<ToneBadge tone={contract.method === "POST" ? "info" : "neutral"}>
 					{contract.method}
@@ -275,28 +458,16 @@ function CallSummary({
 				<code className="break-all">{contract.URL}</code>
 			</div>
 			{contract.payload !== undefined ? (
-				<pre className="overflow-x-auto rounded-md bg-(--sand) p-2 text-xs">
+				<pre className="overflow-x-auto rounded-md border bg-muted/40 p-2 font-mono text-xs">
 					{JSON.stringify(contract.payload, null, 2)}
 				</pre>
 			) : null}
-			<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-				<dt className="text-muted-foreground">API key</dt>
-				<dd>
-					<p>{contract.xApiKey ? "API key: configured" : "API key: none"}</p>
-				</dd>
-				<dt className="text-muted-foreground">Authorization</dt>
-				<dd>
-					<p>
-						{contract.authorizationHeader
-							? "Authorization header: configured"
-							: "Authorization header: none"}
-					</p>
-				</dd>
-			</dl>
-			{details.length > 0 ? (
-				<p className="text-sm text-muted-foreground">{details.join(" · ")}</p>
-			) : null}
-		</fieldset>
+			<ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+				{details.map((detail) => (
+					<li key={detail}>{detail}</li>
+				))}
+			</ul>
+		</ConnectorRow>
 	);
 }
 
@@ -314,7 +485,7 @@ function ScheduleSummary({
 		);
 	}
 	return (
-		<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+		<dl className="grid grid-cols-[6rem_1fr] gap-y-2 text-sm">
 			<dt className="text-muted-foreground">Days</dt>
 			<dd>
 				{dayOfWeek.length > 0
@@ -322,7 +493,7 @@ function ScheduleSummary({
 					: "Any day"}
 			</dd>
 			<dt className="text-muted-foreground">Times</dt>
-			<dd>
+			<dd className="tabular-nums">
 				{timeOfDay.length > 0
 					? timeOfDay.map(minutesToTime).join(", ")
 					: "Any time"}
@@ -335,111 +506,99 @@ function ScheduleSummary({
 	);
 }
 
-const runColumns: DataTableColumn<Run>[] = [
-	{
-		id: "status",
-		accessorFn: (run) => run.status,
-		header: "Status",
-		cell: ({ row }) => <StatusBadge status={row.original.status} />,
-	},
-	{
-		id: "started",
-		accessorFn: (run) => run.started_at ?? run.created_at,
-		header: "Started",
-		cell: ({ row }) => (
-			<span className="text-sm text-muted-foreground">
-				{formatDateTime(row.original.started_at ?? row.original.created_at)}
-			</span>
-		),
-	},
-	{
-		id: "duration",
-		header: "Duration",
-		enableSorting: false,
-		cell: ({ row }) => (
-			<span className="text-sm text-muted-foreground">
-				{formatDuration(row.original.started_at, row.original.finished_at)}
-			</span>
-		),
-	},
-	{
-		id: "actions",
-		header: "Actions",
-		enableSorting: false,
-		meta: {
-			headerClassName: "w-[120px] text-right",
-			cellClassName: "text-right",
+function AgentRuns({
+	runs,
+	selectedRunId,
+	onSelect,
+}: {
+	runs: ReturnType<typeof useAgentRuns>;
+	selectedRunId: string | undefined;
+	onSelect: (runId: string) => void;
+}) {
+	const columns: DataTableColumn<Run>[] = [
+		{
+			id: "status",
+			accessorFn: (run) => run.status,
+			header: "Status",
+			cell: ({ row }) => <StatusBadge status={row.original.status} />,
 		},
-		cell: ({ row }) => <RunActions run={row.original} />,
-	},
-];
-
-function RunActions({ run }: { run: Run }) {
-	const [pending, setPending] = useState(false);
-	const timer = useRef<number>(undefined);
-	useEffect(
-		() => () => {
-			window.clearTimeout(timer.current);
-		},
-		[],
-	);
-
-	return (
-		<DataTableActionsCell>
-			{isActiveRunStatus(run.status) ? (
-				<DataTableActionButton
-					label="Stop"
-					icon={<PauseIcon className="size-4" />}
-					pending={pending}
-					disabled={pending}
-					onClick={() => {
-						window.clearTimeout(timer.current);
-						setPending(true);
-						timer.current = window.setTimeout(() => setPending(false), 800);
-					}}
+		{
+			id: "started",
+			accessorFn: (run) => run.started_at ?? run.created_at,
+			header: "Started",
+			cell: ({ row }) => (
+				<RelativeTime
+					iso={row.original.started_at ?? row.original.created_at}
+					className="text-sm text-muted-foreground"
 				/>
-			) : null}
-			<DataTableActionButton
-				label="View run"
-				icon={<FileTextIcon className="size-4" />}
-				disabled={pending}
-				asChild
-			>
-				<Link to="/runs/$runId" params={{ runId: run.id }} />
-			</DataTableActionButton>
-		</DataTableActionsCell>
-	);
-}
-
-function AgentRuns({ agentId }: { agentId: string }) {
-	const runs = useAgentRuns(agentId);
-
-	if (runs.isPending) {
-		return <LoadingState label="Loading runs…" />;
-	}
-	if (runs.isError) {
-		return (
-			<ErrorState
-				title="Could not load runs"
-				error={runs.error}
-				onRetry={() => void runs.refetch()}
-			/>
-		);
-	}
-	if (runs.data.length === 0) {
-		return (
-			<EmptyState
-				title="No runs yet"
-				description="Start a run and it will show up here with its status and output."
-			/>
-		);
-	}
+			),
+		},
+		{
+			id: "duration",
+			header: "Duration",
+			enableSorting: false,
+			cell: ({ row }) => (
+				<span className="text-sm text-muted-foreground tabular-nums">
+					{formatDuration(row.original.started_at, row.original.finished_at) ||
+						"—"}
+				</span>
+			),
+		},
+		{
+			id: "actions",
+			header: () => <span className="sr-only">Actions</span>,
+			enableSorting: false,
+			meta: {
+				headerClassName: "w-[96px] text-right",
+				cellClassName: "text-right",
+			},
+			cell: ({ row }) => (
+				<DataTableActionsCell>
+					<DataTableActionButton
+						label="Show output"
+						icon={<PanelRightOpenIcon className="size-4" />}
+						onClick={() => onSelect(row.original.id)}
+					/>
+					<DataTableActionButton
+						label="View run"
+						icon={<ArrowUpRightIcon className="size-4" />}
+						asChild
+					>
+						<Link to="/runs/$runId" params={{ runId: row.original.id }} />
+					</DataTableActionButton>
+				</DataTableActionsCell>
+			),
+		},
+	];
 
 	return (
-		<DataTable
-			columns={runColumns}
-			data={runs.data}
-			caption="Runs of this agent"
-		/>
+		<section aria-labelledby="agent-runs-heading" className="space-y-3">
+			<h2 id="agent-runs-heading" className="text-sm font-medium">
+				Runs
+			</h2>
+			{runs.isPending ? (
+				<LoadingState label="Loading runs…" />
+			) : runs.isError ? (
+				<ErrorState
+					title="Could not load runs"
+					error={runs.error}
+					onRetry={() => void runs.refetch()}
+				/>
+			) : runs.data.length === 0 ? (
+				<EmptyState
+					title="No runs yet"
+					description="Start a run and it will show up here with its status and output."
+				/>
+			) : (
+				<DataTable
+					columns={columns}
+					data={runs.data}
+					caption="Runs of this agent"
+					density="compact"
+					onRowClick={(run) => onSelect(run.id)}
+					isRowSelected={(run) => run.id === selectedRunId}
+				/>
+			)}
+		</section>
 	);
 }

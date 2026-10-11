@@ -209,8 +209,10 @@ export function ConnectorTypePicker({
 						<label
 							key={option}
 							className={cn(
-								"flex cursor-pointer flex-col gap-1 rounded-xl border p-3 text-sm",
-								selected ? "border-foreground bg-muted/40" : "border-input",
+								"flex cursor-pointer flex-col gap-1 rounded-lg border bg-background p-3 text-sm transition-[border-color,background-color,box-shadow] duration-150 has-focus-visible:ring-[3px] has-focus-visible:ring-ring/50",
+								selected
+									? "border-foreground bg-muted/40 shadow-xs"
+									: "border-input hover:border-foreground/30",
 							)}
 						>
 							<span className="flex items-center gap-2 font-medium">
@@ -221,6 +223,7 @@ export function ConnectorTypePicker({
 									value={option}
 									checked={selected}
 									onChange={() => onChange(option)}
+									className="accent-foreground"
 								/>
 								{item?.name ?? connectorLabel(option)}
 							</span>

@@ -39,9 +39,9 @@ export default function DashboardNavigation({
 									to={route.to}
 									data-active={isActive ? "true" : undefined}
 									className={cn(
-										"flex items-center rounded-lg px-2 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+										"flex items-center rounded-md px-2 text-muted-foreground transition-colors duration-150 hover:bg-sidebar-accent hover:text-foreground",
 										isActive &&
-											"bg-sidebar-accent font-medium text-sidebar-accent-foreground",
+											"bg-sidebar-accent font-medium text-foreground shadow-[inset_0_0_0_1px_var(--sidebar-border)]",
 										isCollapsed && "justify-center",
 									)}
 								>

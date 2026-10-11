@@ -1,12 +1,15 @@
 import { Link } from "@tanstack/react-router";
-import { Trash2Icon } from "lucide-react";
+import { Loader2Icon, PlusIcon, Trash2Icon, WebhookIcon } from "lucide-react";
 import { useState } from "react";
 import { DataTable, type DataTableColumn } from "#/components/data-table";
 import {
 	DataTableActionButton,
 	DataTableActionsCell,
 } from "#/components/data-table-action-button";
+import { Section } from "#/components/layout/page";
 import { Notice } from "#/components/notice";
+import { RelativeTime } from "#/components/relative-time";
+import { OutputBlock } from "#/components/runs/output-block";
 import { EmptyState, ErrorState, LoadingState } from "#/components/states";
 import { Button } from "#/components/ui/button";
 import { Label } from "#/components/ui/label";
@@ -26,7 +29,7 @@ import {
 	webhookFireUrl,
 } from "#/lib/api/queries";
 import type { Webhook } from "#/lib/api/schemas";
-import { formatDateTime } from "#/lib/format";
+import { notify } from "#/lib/feedback";
 import { buttonLinkClass, tableLinkClass } from "#/lib/styles";
 
 export function WebhookList() {
@@ -96,28 +99,35 @@ export function WebhookList() {
 			accessorFn: (row) => row.target_type,
 			header: "Type",
 			cell: ({ row }) => (
-				<span className="capitalize">{row.original.target_type}</span>
+				<span className="text-sm capitalize text-muted-foreground">
+					{row.original.target_type}
+				</span>
 			),
 		},
 		{
 			id: "secret",
 			header: "Secret",
 			enableSorting: false,
-			cell: ({ row }) => <code className="text-xs">{row.original.secret}</code>,
+			cell: ({ row }) => (
+				<code className="text-xs text-muted-foreground">
+					{row.original.secret}
+				</code>
+			),
 		},
 		{
 			id: "created",
 			accessorFn: (row) => row.created_at,
 			header: "Created",
 			cell: ({ row }) => (
-				<span className="text-sm text-muted-foreground">
-					{formatDateTime(row.original.created_at)}
-				</span>
+				<RelativeTime
+					iso={row.original.created_at}
+					className="text-sm text-muted-foreground"
+				/>
 			),
 		},
 		{
 			id: "actions",
-			header: "Actions",
+			header: () => <span className="sr-only">Actions</span>,
 			enableSorting: false,
 			meta: {
 				headerClassName: "w-[80px] text-right",
@@ -133,7 +143,13 @@ export function WebhookList() {
 							deleteWebhook.isPending &&
 							deleteWebhook.variables === row.original.id
 						}
-						onClick={() => deleteWebhook.mutate(row.original.id)}
+						onClick={() =>
+							deleteWebhook.mutate(row.original.id, {
+								onSuccess: () => notify.success("Webhook deleted"),
+								onError: (error) =>
+									notify.error("Could not delete the webhook", error),
+							})
+						}
 					/>
 				</DataTableActionsCell>
 			),
@@ -143,27 +159,37 @@ export function WebhookList() {
 	const canSubmit =
 		targetType === "chain" ? Boolean(chainId) : Boolean(agentId);
 
+	const create = () => {
+		if (!canSubmit) return;
+		createWebhook.mutate(
+			targetType === "chain"
+				? { target_type: "chain", target_chain_id: chainId }
+				: { target_type: "agent", target_agent_id: agentId },
+			{
+				onSuccess: (webhook) => {
+					setCreated(webhook);
+					notify.success("Webhook created", {
+						description: "Copy the secret now; it is shown once.",
+					});
+				},
+				onError: (error) => notify.error("Could not create the webhook", error),
+			},
+		);
+	};
+
 	return (
 		<div className="space-y-6">
-			<form
-				className="island-shell space-y-3 rounded-xl p-4"
-				onSubmit={(event) => {
-					event.preventDefault();
-					if (!canSubmit) return;
-					createWebhook.mutate(
-						targetType === "chain"
-							? { target_type: "chain", target_chain_id: chainId }
-							: { target_type: "agent", target_agent_id: agentId },
-						{ onSuccess: (webhook) => setCreated(webhook) },
-					);
-				}}
+			<Section
+				title="New webhook"
+				description="A signed public URL that starts a run of the chosen agent or chain."
 			>
-				<h2 className="text-base font-semibold">New webhook</h2>
-				<p className="text-sm text-muted-foreground">
-					Creates a signed public URL that starts a run of the chosen agent or
-					chain.
-				</p>
-				<div className="flex flex-wrap items-end gap-3">
+				<form
+					className="flex flex-wrap items-end gap-3"
+					onSubmit={(event) => {
+						event.preventDefault();
+						create();
+					}}
+				>
 					<div className="min-w-40 space-y-1.5">
 						<Label htmlFor="webhook-target-type">Target</Label>
 						<Select
@@ -221,15 +247,20 @@ export function WebhookList() {
 						type="submit"
 						disabled={!canSubmit || createWebhook.isPending}
 					>
+						{createWebhook.isPending ? (
+							<Loader2Icon className="animate-spin" aria-hidden="true" />
+						) : (
+							<PlusIcon aria-hidden="true" />
+						)}
 						{createWebhook.isPending ? "Creating…" : "Create webhook"}
 					</Button>
-				</div>
+				</form>
 				{createWebhook.error ? (
-					<p role="alert" className="text-sm text-destructive">
+					<p role="alert" className="mt-3 text-sm text-destructive">
 						{createWebhook.error.message}
 					</p>
 				) : null}
-			</form>
+			</Section>
 
 			{created ? (
 				<Notice tone="info" title="Copy this secret now">
@@ -238,33 +269,43 @@ export function WebhookList() {
 						<code>X-Webhook-Signature: sha256=&lt;hex&gt;</code> of the raw
 						body.
 					</p>
-					<dl className="mt-3 space-y-2 text-sm">
-						<div>
-							<dt className="text-muted-foreground">Fire URL</dt>
+					<dl className="mt-3 space-y-3 text-sm">
+						<div className="space-y-1">
+							<dt className="text-xs font-medium">Fire URL</dt>
 							<dd>
-								<code className="break-all">{webhookFireUrl(created.id)}</code>
+								<OutputBlock
+									label="Fire URL"
+									value={webhookFireUrl(created.id)}
+								/>
 							</dd>
 						</div>
-						<div>
-							<dt className="text-muted-foreground">Secret</dt>
+						<div className="space-y-1">
+							<dt className="text-xs font-medium">Secret</dt>
 							<dd>
-								<code className="break-all">{created.secret}</code>
+								<OutputBlock label="Secret" value={created.secret} />
 							</dd>
 						</div>
-					</dl>
-					<pre className="mt-3 overflow-x-auto rounded-md bg-(--sand) p-2 text-xs">
-						{`BODY='{"ticket":"INC-1"}'
+						<div className="space-y-1">
+							<dt className="text-xs font-medium">Example</dt>
+							<dd>
+								<OutputBlock
+									label="Example"
+									value={`BODY='{"ticket":"INC-1"}'
 SIG=$(python -c "import hmac,hashlib,sys; print(hmac.new(sys.argv[1].encode(), sys.argv[2].encode(), hashlib.sha256).hexdigest())" '${created.secret}' "$BODY")
 curl -s -X POST '${webhookFireUrl(created.id)}' \\
   -H 'Content-Type: application/json' \\
   -H "X-Webhook-Signature: sha256=$SIG" \\
   -d "$BODY"`}
-					</pre>
+								/>
+							</dd>
+						</div>
+					</dl>
 				</Notice>
 			) : null}
 
 			{webhooks.data.items.length === 0 ? (
 				<EmptyState
+					icon={<WebhookIcon />}
 					title="No webhooks yet"
 					description="Create one after you have an agent or chain to trigger."
 					action={

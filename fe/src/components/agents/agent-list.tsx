@@ -1,19 +1,18 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import {
-	FileTextIcon,
+	BotIcon,
 	PauseIcon,
 	PlayIcon,
 	Settings,
 	Trash2Icon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
 import { DataTable, type DataTableColumn } from "#/components/data-table";
 import {
 	DataTableActionButton,
 	DataTableActionsCell,
 } from "#/components/data-table-action-button";
 import { HttpCallChip } from "#/components/http-call-chip";
-import { Notice } from "#/components/notice";
+import { RelativeTime } from "#/components/relative-time";
 import { EmptyState, ErrorState, LoadingState } from "#/components/states";
 import { StatusBadge } from "#/components/status-badge";
 import { ToneBadge } from "#/components/tone-badge";
@@ -27,12 +26,8 @@ import {
 } from "#/lib/api/queries";
 import type { Agent, Connector, Execution } from "#/lib/api/schemas";
 import { connectorLabel, httpContractFromConnector } from "#/lib/api/schemas";
-import { formatDateTime } from "#/lib/format";
+import { notify } from "#/lib/feedback";
 import { buttonLinkClass, tableLinkClass } from "#/lib/styles";
-
-type AgentRowAction = "start" | "stop" | "delete";
-
-const STUB_ACTION_MS = 800;
 
 function lastExecutionFor(
 	agentId: string,
@@ -104,11 +99,14 @@ function dataColumns(
 			header: "Connectors",
 			enableSorting: false,
 			meta: { cellClassName: "whitespace-normal" },
-			cell: ({ row }) => (
-				<div className="flex flex-wrap gap-1">
-					{connectorChipsForAgent(row.original, connectors)}
-				</div>
-			),
+			cell: ({ row }) => {
+				const chips = connectorChipsForAgent(row.original, connectors);
+				return chips.length > 0 ? (
+					<div className="flex flex-wrap gap-1">{chips}</div>
+				) : (
+					<span className="text-sm text-muted-foreground">—</span>
+				);
+			},
 		},
 		{
 			id: "last_run",
@@ -122,7 +120,13 @@ function dataColumns(
 					row.original.last_run,
 				);
 				return last ? (
-					<StatusBadge status={last.status} />
+					<div className="flex items-center gap-2">
+						<StatusBadge status={last.status} />
+						<RelativeTime
+							iso={last.created_at}
+							className="text-xs text-muted-foreground"
+						/>
+					</div>
 				) : (
 					<span className="text-sm text-muted-foreground">Never run</span>
 				);
@@ -133,9 +137,10 @@ function dataColumns(
 			accessorFn: (agent) => agent.created_at,
 			header: "Created",
 			cell: ({ row }) => (
-				<span className="text-sm text-muted-foreground">
-					{formatDateTime(row.original.created_at)}
-				</span>
+				<RelativeTime
+					iso={row.original.created_at}
+					className="text-sm text-muted-foreground"
+				/>
 			),
 		},
 	];
@@ -168,6 +173,7 @@ export function AgentList() {
 	if (items.length === 0) {
 		return (
 			<EmptyState
+				icon={<BotIcon />}
 				title="No agents yet"
 				description="Describe what an agent should do, add HTTP, MCP, or database tools, and run it in an isolated container."
 				action={
@@ -194,54 +200,42 @@ export function AgentList() {
 }
 
 function AgentListTable({ items }: { items: Agent[] }) {
+	const navigate = useNavigate();
 	const connectors = useConnectors();
 	const executions = useExecutions();
 	const startRun = useStartRun();
-	const [pendingAction, setPendingAction] = useState<{
-		id: string;
-		type: AgentRowAction;
-	} | null>(null);
-	const stubTimer = useRef<number>(undefined);
 
-	useEffect(
-		() => () => {
-			window.clearTimeout(stubTimer.current);
-		},
-		[],
-	);
-
-	const isActionPending = (action: AgentRowAction, agentId: string) => {
-		if (action === "start") {
-			return startRun.isPending && startRun.variables === agentId;
-		}
-		return pendingAction?.id === agentId && pendingAction.type === action;
-	};
-
-	const isBusy = (agentId: string) =>
-		(startRun.isPending && startRun.variables === agentId) ||
-		pendingAction?.id === agentId;
-
-	const stubAction = (agent: Agent, type: Exclude<AgentRowAction, "start">) => {
-		window.clearTimeout(stubTimer.current);
-		setPendingAction({ id: agent.id, type });
-		stubTimer.current = window.setTimeout(() => {
-			setPendingAction(null);
-		}, STUB_ACTION_MS);
-	};
+	const start = (agent: Agent) =>
+		startRun.mutate(agent.id, {
+			onSuccess: (run) =>
+				notify.success("Run started", {
+					description: agent.title,
+					action: {
+						label: "View",
+						onClick: () =>
+							void navigate({
+								to: "/agents/$agentId",
+								params: { agentId: agent.id },
+								search: { run: run.id },
+							}),
+					},
+				}),
+			onError: (error) => notify.error("Could not start the run", error),
+		});
 
 	const columns: DataTableColumn<Agent>[] = [
 		...dataColumns(connectors.data ?? [], executions.data ?? []),
 		{
 			id: "actions",
-			header: "Actions",
+			header: () => <span className="sr-only">Actions</span>,
 			enableSorting: false,
 			meta: {
-				headerClassName: "w-[180px] text-right",
+				headerClassName: "w-[132px] text-right",
 				cellClassName: "text-right",
 			},
 			cell: ({ row }) => {
 				const agent = row.original;
-				const busy = isBusy(agent.id);
+				const starting = startRun.isPending && startRun.variables === agent.id;
 				const running = isRunning(agent, executions.data ?? []);
 				return (
 					<DataTableActionsCell>
@@ -249,42 +243,36 @@ function AgentListTable({ items }: { items: Agent[] }) {
 							<DataTableActionButton
 								label="Stop"
 								icon={<PauseIcon className="size-4" />}
-								pending={isActionPending("stop", agent.id)}
-								disabled={busy}
-								onClick={() => stubAction(agent, "stop")}
+								onClick={() =>
+									notify.info("Stopping a run is not available yet", {
+										description: "The run will finish or time out on its own.",
+									})
+								}
 							/>
 						) : (
 							<DataTableActionButton
 								label="Start"
 								icon={<PlayIcon className="size-4" />}
-								pending={isActionPending("start", agent.id)}
-								disabled={busy}
-								onClick={() => startRun.mutate(agent.id)}
+								pending={starting}
+								onClick={() => start(agent)}
 							/>
 						)}
 						<DataTableActionButton
 							label="Edit configuration"
 							icon={<Settings className="size-4" />}
-							disabled={busy}
+							disabled={starting}
 							asChild
 						>
 							<Link to="/agents/$agentId/edit" params={{ agentId: agent.id }} />
 						</DataTableActionButton>
 						<DataTableActionButton
-							label="View details"
-							icon={<FileTextIcon className="size-4" />}
-							disabled={busy}
-							asChild
-						>
-							<Link to="/agents/$agentId" params={{ agentId: agent.id }} />
-						</DataTableActionButton>
-						<DataTableActionButton
 							label="Delete"
 							icon={<Trash2Icon className="size-4" />}
-							pending={isActionPending("delete", agent.id)}
-							disabled={busy}
+							disabled={starting}
 							destructive
-							onClick={() => stubAction(agent, "delete")}
+							onClick={() =>
+								notify.info("Deleting agents is not available yet")
+							}
 						/>
 					</DataTableActionsCell>
 				);
@@ -293,13 +281,13 @@ function AgentListTable({ items }: { items: Agent[] }) {
 	];
 
 	return (
-		<>
-			{startRun.error ? (
-				<Notice tone="danger" className="mb-3" title="Could not start the run">
-					<p>{startRun.error.message}</p>
-				</Notice>
-			) : null}
-			<DataTable columns={columns} data={items} caption="Your agents" />
-		</>
+		<DataTable
+			columns={columns}
+			data={items}
+			caption="Your agents"
+			onRowClick={(agent) =>
+				void navigate({ to: "/agents/$agentId", params: { agentId: agent.id } })
+			}
+		/>
 	);
 }

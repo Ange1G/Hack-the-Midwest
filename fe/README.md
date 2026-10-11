@@ -43,6 +43,20 @@ npm run build
 
 This project uses [Tailwind CSS](https://tailwindcss.com/) for styling.
 
+- **Colour** lives only in the semantic `:root` / `.dark` variables in
+  `src/styles.css` (`--background`, `--foreground`, `--muted`, `--border`,
+  `--primary`, `--destructive`, `--success`, `--warning`, `--info`, …). Swap
+  the palette there; components never reference raw colours.
+- **Type** is Geist Sans and Geist Mono.
+- **Feedback** uses Sonner toasts through `src/lib/feedback.ts` (`notify.success`,
+  `notify.info`, `notify.error`). Never put secrets or tokens in a toast.
+- **Motion** uses framer-motion helpers in `src/lib/motion.ts`. All non-essential
+  motion is disabled under `prefers-reduced-motion`.
+- **Runs** started from an agent page show live in the inline run panel. The
+  selected run is kept in the URL (`/agents/<id>?run=<run-id>`), so toasts and
+  links can deep link to it. A run watcher in the app shell toasts once when a
+  watched run finishes, even if you navigated away.
+
 ### Removing Tailwind CSS
 
 If you prefer not to use Tailwind CSS:

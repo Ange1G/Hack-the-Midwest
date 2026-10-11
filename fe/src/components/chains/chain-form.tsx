@@ -2,10 +2,12 @@ import { useNavigate } from "@tanstack/react-router";
 import {
 	ChevronDownIcon,
 	ChevronUpIcon,
+	Loader2Icon,
 	PlusIcon,
 	Trash2Icon,
 } from "lucide-react";
 import { useState } from "react";
+import { Section } from "#/components/layout/page";
 import { FieldError } from "#/components/schedule/field-error";
 import {
 	parseScheduleTimes,
@@ -25,6 +27,7 @@ import {
 import { ApiError } from "#/lib/api/client";
 import { useAgents, useCreateChain } from "#/lib/api/queries";
 import { chainCreateSchema } from "#/lib/api/schemas";
+import { notify } from "#/lib/feedback";
 
 type StepDraft = { key: number; agentId: string; label: string };
 
@@ -58,7 +61,7 @@ export function ChainForm() {
 
 	return (
 		<form
-			className="space-y-8"
+			className="max-w-3xl space-y-6"
 			onSubmit={(event) => {
 				event.preventDefault();
 				const times = parseScheduleTimes(schedule.times);
@@ -100,11 +103,13 @@ export function ChainForm() {
 						schedule: emptySchedule ? undefined : parsed.data.schedule,
 					},
 					{
-						onSuccess: (chain) =>
-							navigate({
+						onSuccess: (chain) => {
+							notify.success("Chain created", { description: chain.title });
+							void navigate({
 								to: "/chains/$chainId",
 								params: { chainId: chain.id },
-							}),
+							});
+						},
 						onError: (error) => {
 							if (error instanceof ApiError && error.fields) {
 								setErrors(error.fields);
@@ -121,32 +126,29 @@ export function ChainForm() {
 				);
 			}}
 		>
-			<div className="space-y-1.5">
-				<Label htmlFor="chain-title">Name</Label>
-				<Input
-					id="chain-title"
-					value={title}
-					onChange={(event) => setTitle(event.target.value)}
-					aria-invalid={Boolean(errors.title)}
-				/>
-				<FieldError message={errors.title} />
-			</div>
-
-			<section className="space-y-3" aria-labelledby="chain-steps-heading">
-				<div>
-					<h2 id="chain-steps-heading" className="text-base font-semibold">
-						Steps
-					</h2>
-					<p className="text-sm text-muted-foreground">
-						Order is the run order. Each step receives the previous step's
-						output.
-					</p>
+			<Section title="General">
+				<div className="space-y-1.5">
+					<Label htmlFor="chain-title">Name</Label>
+					<Input
+						id="chain-title"
+						value={title}
+						onChange={(event) => setTitle(event.target.value)}
+						aria-invalid={Boolean(errors.title)}
+					/>
+					<FieldError message={errors.title} />
 				</div>
+			</Section>
+
+			<Section
+				title="Steps"
+				description="Order is the run order. Each step receives the previous step's output."
+				contentClassName="space-y-3"
+			>
 				<ol className="space-y-3">
 					{steps.map((step, index) => (
 						<li
 							key={step.key}
-							className="space-y-3 rounded-lg border border-(--line) p-3"
+							className="space-y-3 rounded-lg border bg-card p-4"
 						>
 							<div className="flex flex-wrap items-center justify-between gap-2">
 								<p className="text-sm font-medium">Step {index + 1}</p>
@@ -242,27 +244,38 @@ export function ChainForm() {
 				<Button
 					type="button"
 					variant="outline"
+					size="sm"
 					onClick={() => setSteps((current) => [...current, emptyStep()])}
 				>
 					<PlusIcon className="size-4" />
 					Add step
 				</Button>
-			</section>
+			</Section>
 
-			<ScheduleFields
-				value={schedule}
-				onChange={setSchedule}
-				errors={{
-					days: errors["schedule.days"] ?? errors["schedule.dayOfWeek"],
-					times: errors["schedule.times"] ?? errors["schedule.timeOfDay"],
-					month: errors["schedule.month"],
-				}}
-			/>
+			<Section
+				title="Schedule"
+				description="Optional. Leave empty to run only on demand."
+			>
+				<ScheduleFields
+					value={schedule}
+					onChange={setSchedule}
+					errors={{
+						days: errors["schedule.days"] ?? errors["schedule.dayOfWeek"],
+						times: errors["schedule.times"] ?? errors["schedule.timeOfDay"],
+						month: errors["schedule.month"],
+					}}
+				/>
+			</Section>
 
 			<FieldError message={errors.form} />
-			<Button type="submit" disabled={createChain.isPending}>
-				{createChain.isPending ? "Creating…" : "Create chain"}
-			</Button>
+			<div className="flex justify-end border-t pt-6">
+				<Button type="submit" disabled={createChain.isPending}>
+					{createChain.isPending ? (
+						<Loader2Icon className="animate-spin" aria-hidden="true" />
+					) : null}
+					{createChain.isPending ? "Creating…" : "Create chain"}
+				</Button>
+			</div>
 		</form>
 	);
 }

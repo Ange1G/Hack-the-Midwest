@@ -16,6 +16,7 @@ import {
 } from "#/components/ui/sidebar";
 import type { SessionDisplayContext } from "#/config/developer-contexts";
 import { useSignOut } from "#/lib/api/queries";
+import { notify } from "#/lib/feedback";
 import { cn } from "#/lib/utils";
 
 export function NavUser({
@@ -85,7 +86,13 @@ export function NavUser({
 						<DropdownMenuItem
 							disabled={logout.isPending}
 							onClick={() =>
-								logout.mutate(undefined, { onSuccess: onLoggedOut })
+								logout.mutate(undefined, {
+									onSuccess: () => {
+										notify.success("Signed out");
+										onLoggedOut();
+									},
+									onError: (error) => notify.error("Could not sign out", error),
+								})
 							}
 						>
 							<LogOut aria-hidden="true" className="mr-2 size-4 opacity-80" />

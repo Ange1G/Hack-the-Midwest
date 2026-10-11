@@ -1,12 +1,27 @@
 import { Link } from "@tanstack/react-router";
+import { PlugIcon } from "lucide-react";
 import { DataTable, type DataTableColumn } from "#/components/data-table";
+import { RelativeTime } from "#/components/relative-time";
 import { EmptyState, ErrorState, LoadingState } from "#/components/states";
 import { ToneBadge } from "#/components/tone-badge";
 import { Button } from "#/components/ui/button";
 import { useConnectors } from "#/lib/api/queries";
-import { type Connector, connectorLabel } from "#/lib/api/schemas";
-import { formatDateTime } from "#/lib/format";
+import {
+	type Connector,
+	connectorConfigRecord,
+	connectorLabel,
+} from "#/lib/api/schemas";
 import { buttonLinkClass } from "#/lib/styles";
+
+// The non-secret address a connector points at, for scanning the list.
+function connectorTarget(connector: Connector): string | null {
+	const config = connectorConfigRecord(connector);
+	for (const key of ["URL", "url", "host"]) {
+		const value = config[key];
+		if (typeof value === "string" && value) return value;
+	}
+	return null;
+}
 
 const columns: DataTableColumn<Connector>[] = [
 	{
@@ -14,7 +29,7 @@ const columns: DataTableColumn<Connector>[] = [
 		accessorFn: (row) => row.name,
 		header: "Name",
 		cell: ({ row }) => (
-			<span className="font-mono text-sm">{row.original.name}</span>
+			<span className="font-mono text-sm font-medium">{row.original.name}</span>
 		),
 	},
 	{
@@ -28,13 +43,33 @@ const columns: DataTableColumn<Connector>[] = [
 		),
 	},
 	{
+		id: "target",
+		header: "Target",
+		enableSorting: false,
+		meta: { cellClassName: "max-w-xs" },
+		cell: ({ row }) => {
+			const target = connectorTarget(row.original);
+			return target ? (
+				<span
+					className="block truncate font-mono text-xs text-muted-foreground"
+					title={target}
+				>
+					{target}
+				</span>
+			) : (
+				<span className="text-sm text-muted-foreground">—</span>
+			);
+		},
+	},
+	{
 		id: "created",
 		accessorFn: (row) => row.created_at,
 		header: "Created",
 		cell: ({ row }) => (
-			<span className="text-sm text-muted-foreground">
-				{formatDateTime(row.original.created_at)}
-			</span>
+			<RelativeTime
+				iso={row.original.created_at}
+				className="text-sm text-muted-foreground"
+			/>
 		),
 	},
 ];
@@ -57,6 +92,7 @@ export function ConnectorList() {
 	if (connectors.data.length === 0) {
 		return (
 			<EmptyState
+				icon={<PlugIcon />}
 				title="No connectors yet"
 				description="Create an HTTP, MCP, or database connector, then attach it to an agent."
 				action={
@@ -75,6 +111,7 @@ export function ConnectorList() {
 			columns={columns}
 			data={connectors.data}
 			caption="Your connectors"
+			density="compact"
 		/>
 	);
 }

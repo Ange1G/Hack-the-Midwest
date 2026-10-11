@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { PlusIcon } from "lucide-react";
 import { ConnectorList } from "#/components/connectors/connector-list";
 import { PageHeader } from "#/components/layout/page";
 import { Button } from "#/components/ui/button";
@@ -17,6 +18,7 @@ function ConnectorsPage() {
 				action={
 					<Button asChild>
 						<Link to="/connectors/new" className={buttonLinkClass}>
+							<PlusIcon aria-hidden="true" />
 							New connector
 						</Link>
 					</Button>

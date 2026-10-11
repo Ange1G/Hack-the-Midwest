@@ -14,7 +14,9 @@ import {
 import { cn } from "#/lib/utils";
 
 export function DataTableActionsCell({ children }: { children: ReactNode }) {
-	return <div className="flex items-center justify-end gap-1">{children}</div>;
+	return (
+		<div className="flex items-center justify-end gap-0.5">{children}</div>
+	);
 }
 
 type Props = {
@@ -39,9 +41,8 @@ export function DataTableActionButton({
 	children,
 }: Props) {
 	const className = cn(
-		"h-8 w-8 text-foreground",
-		destructive &&
-			"text-destructive hover:bg-destructive hover:text-destructive-foreground",
+		"size-8 text-muted-foreground hover:text-foreground",
+		destructive && "hover:bg-destructive/10 hover:text-destructive",
 	);
 	const content = pending ? (
 		<Loader2 className="size-4 animate-spin" aria-hidden="true" />
@@ -58,7 +59,7 @@ export function DataTableActionButton({
 						aria-label={label}
 						className={className}
 						size="icon"
-						variant="outline"
+						variant="ghost"
 					>
 						{cloneElement(
 							children,
@@ -85,7 +86,7 @@ export function DataTableActionButton({
 					disabled={disabled || pending}
 					onClick={onClick}
 					size="icon"
-					variant="outline"
+					variant="ghost"
 				>
 					{content}
 				</Button>

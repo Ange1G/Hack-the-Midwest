@@ -25,7 +25,7 @@ describe("AppShell", () => {
 		await waitFor(() => {
 			expect(document.querySelector('[data-slot="sidebar"]')).toHaveAttribute(
 				"data-variant",
-				"floating",
+				"inset",
 			);
 		});
 

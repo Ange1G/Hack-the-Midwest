@@ -5,6 +5,7 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import { z } from "zod";
+import { resetWatchedRuns, watchRun } from "#/lib/run-watch";
 import { API_BASE_URL, ApiError, api, DEV_USER_HEADER } from "./client";
 import {
 	type Agent,
@@ -148,6 +149,7 @@ export function useSignOut() {
 			clearSessionUser();
 		},
 		onSuccess: () => {
+			resetWatchedRuns();
 			queryClient.setQueryData(queryKeys.me, null);
 			queryClient.removeQueries({
 				predicate: (query) => query.queryKey[0] !== "me",
@@ -350,6 +352,7 @@ export function useStartRun(agentId?: string) {
 			);
 		},
 		onSuccess: (run: Run) => {
+			if (isActiveRunStatus(run.status)) watchRun(run.id);
 			queryClient.setQueryData(queryKeys.run(run.id), run);
 			queryClient.setQueryData<Run[]>(queryKeys.executions, (current) => {
 				const items = current ?? [];

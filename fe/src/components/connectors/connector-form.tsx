@@ -1,3 +1,4 @@
+import { Loader2Icon } from "lucide-react";
 import { useState } from "react";
 import {
 	buildConnectorBody,
@@ -11,6 +12,7 @@ import { Button } from "#/components/ui/button";
 import { ApiError } from "#/lib/api/client";
 import { useConnectorTypes, useCreateConnector } from "#/lib/api/queries";
 import type { ConnectorType } from "#/lib/api/schemas";
+import { notify } from "#/lib/feedback";
 
 export function ConnectorForm({ onCreated }: { onCreated?: () => void }) {
 	const catalog = useConnectorTypes();
@@ -36,7 +38,12 @@ export function ConnectorForm({ onCreated }: { onCreated?: () => void }) {
 				setErrors(problems);
 				if (!body || Object.keys(problems).length > 0) return;
 				createConnector.mutate(body, {
-					onSuccess: () => onCreated?.(),
+					onSuccess: (connector) => {
+						notify.success("Connector created", {
+							description: connector.name,
+						});
+						onCreated?.();
+					},
 					onError: (error) => {
 						if (error instanceof ApiError && error.fields) {
 							setErrors(error.fields);
@@ -84,9 +91,14 @@ export function ConnectorForm({ onCreated }: { onCreated?: () => void }) {
 				</p>
 			) : null}
 
-			<Button type="submit" disabled={createConnector.isPending}>
-				{createConnector.isPending ? "Creating…" : "Create connector"}
-			</Button>
+			<div className="flex justify-end border-t pt-6">
+				<Button type="submit" disabled={createConnector.isPending}>
+					{createConnector.isPending ? (
+						<Loader2Icon className="animate-spin" aria-hidden="true" />
+					) : null}
+					{createConnector.isPending ? "Creating…" : "Create connector"}
+				</Button>
+			</div>
 		</form>
 	);
 }

@@ -1,15 +1,15 @@
 import { Link } from "@tanstack/react-router";
-import { Bot, FileTextIcon } from "lucide-react";
+import { ArrowUpRightIcon, Bot, ShieldCheckIcon } from "lucide-react";
 import { DataTable, type DataTableColumn } from "#/components/data-table";
 import {
 	DataTableActionButton,
 	DataTableActionsCell,
 } from "#/components/data-table-action-button";
+import { RelativeTime } from "#/components/relative-time";
 import { EmptyState, ErrorState, LoadingState } from "#/components/states";
 import { type Tone, ToneBadge } from "#/components/tone-badge";
 import { useAgents, useFindings } from "#/lib/api/queries";
 import type { Finding } from "#/lib/api/schemas";
-import { formatDateTime } from "#/lib/format";
 import { tableLinkClass } from "#/lib/styles";
 
 type FindingRow = Finding & { agent_name: string };
@@ -85,14 +85,15 @@ const columns: DataTableColumn<FindingRow>[] = [
 		accessorFn: (finding) => finding.created_at,
 		header: "When",
 		cell: ({ row }) => (
-			<span className="text-sm text-muted-foreground">
-				{formatDateTime(row.original.created_at)}
-			</span>
+			<RelativeTime
+				iso={row.original.created_at}
+				className="text-sm text-muted-foreground"
+			/>
 		),
 	},
 	{
 		id: "actions",
-		header: "Actions",
+		header: () => <span className="sr-only">Actions</span>,
 		enableSorting: false,
 		meta: {
 			headerClassName: "w-[120px] text-right",
@@ -112,7 +113,7 @@ const columns: DataTableColumn<FindingRow>[] = [
 				</DataTableActionButton>
 				<DataTableActionButton
 					label="View run"
-					icon={<FileTextIcon className="size-4" />}
+					icon={<ArrowUpRightIcon className="size-4" />}
 					asChild
 				>
 					<Link to="/runs/$runId" params={{ runId: row.original.run_id }} />
@@ -141,6 +142,7 @@ export function FindingsList() {
 	if (findings.data.length === 0) {
 		return (
 			<EmptyState
+				icon={<ShieldCheckIcon />}
 				title="No findings"
 				description="The security monitor has not flagged or terminated any runs."
 			/>

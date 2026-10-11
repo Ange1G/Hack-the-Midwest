@@ -2,7 +2,6 @@ import {
 	type CellData,
 	type ColumnDef,
 	createSortedRowModel,
-	flexRender,
 	metaHelper,
 	type RowData,
 	rowSortingFeature,
@@ -14,7 +13,9 @@ import {
 	tableFeatures,
 	useTable,
 } from "@tanstack/react-table";
-import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
+import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react";
+import type { MouseEvent, ReactNode } from "react";
 import {
 	Table,
 	TableBody,
@@ -24,6 +25,7 @@ import {
 	TableRow,
 } from "#/components/ui/table";
 import { TooltipProvider } from "#/components/ui/tooltip";
+import { easeOut } from "#/lib/motion";
 import { cn } from "#/lib/utils";
 
 type DataTableColumnMeta = {
@@ -55,17 +57,37 @@ type Props<TData extends RowData> = {
 	caption: string;
 	initialSorting?: SortingState;
 	emptyMessage?: string;
+	density?: "comfortable" | "compact";
+	// Pointer shortcut for the row's primary destination. Every clickable row
+	// must also render an explicit link or button for keyboard users.
+	onRowClick?: (row: TData) => void;
+	isRowSelected?: (row: TData) => boolean;
+	className?: string;
 };
 
+const MAX_STAGGERED_ROWS = 12;
+
+// Clicks on controls inside a row keep their own behaviour.
+function fromInteractiveChild(event: MouseEvent<HTMLElement>): boolean {
+	const target = event.target as HTMLElement;
+	const interactive = target.closest(
+		"a,button,input,select,textarea,label,[role=menuitem],[role=option]",
+	);
+	return interactive !== null && interactive !== event.currentTarget;
+}
+
 function SortIcon({ direction }: { direction: false | "asc" | "desc" }) {
-	const className = "size-3.5 text-muted-foreground";
+	const className = "size-3";
 	if (direction === "asc")
 		return <ArrowUp className={className} aria-hidden="true" />;
 	if (direction === "desc") {
 		return <ArrowDown className={className} aria-hidden="true" />;
 	}
 	return (
-		<ArrowUpDown className={`${className} opacity-60`} aria-hidden="true" />
+		<ChevronsUpDown
+			className={`${className} opacity-0 transition-opacity group-hover/sort:opacity-60`}
+			aria-hidden="true"
+		/>
 	);
 }
 
@@ -77,12 +99,29 @@ function ariaSort(
 	return undefined;
 }
 
+const MotionTableRow = motion.create(TableRow);
+
+// flexRender mounts a function renderer as a component, so a column array
+// rebuilt on each render (closures over query data) would give every cell a
+// new component type and remount its controls mid-interaction. Calling the
+// renderer keeps the cell's element tree stable across renders.
+function renderSlot<TProps extends object>(
+	slot: ReactNode | ((props: TProps) => ReactNode) | undefined,
+	props: TProps,
+): ReactNode {
+	return typeof slot === "function" ? slot(props) : slot;
+}
+
 export function DataTable<TData extends RowData>({
 	columns,
 	data,
 	caption,
 	initialSorting = [],
 	emptyMessage = "Nothing to show.",
+	density = "comfortable",
+	onRowClick,
+	isRowSelected,
+	className,
 }: Props<TData>) {
 	const table = useTable({
 		features,
@@ -91,13 +130,15 @@ export function DataTable<TData extends RowData>({
 		initialState: { sorting: initialSorting },
 	});
 	const rows = table.getRowModel().rows;
+	const reduceMotion = useReducedMotion();
+	const cellHeight = density === "compact" ? "h-11" : "h-14";
 
 	return (
-		<div className="table-panel overflow-hidden rounded-xl">
-			<TooltipProvider delayDuration={0}>
+		<div className={cn("overflow-hidden rounded-lg border bg-card", className)}>
+			<TooltipProvider delayDuration={300}>
 				<Table>
 					<caption className="sr-only">{caption}</caption>
-					<TableHeader>
+					<TableHeader className="bg-muted/40">
 						{table.getHeaderGroups().map((headerGroup) => (
 							<TableRow
 								key={headerGroup.id}
@@ -112,13 +153,13 @@ export function DataTable<TData extends RowData>({
 											: column.id;
 									const content = header.isPlaceholder
 										? null
-										: flexRender(column.columnDef.header, header.getContext());
+										: renderSlot(column.columnDef.header, header.getContext());
 									return (
 										<TableHead
 											key={header.id}
 											aria-sort={ariaSort(direction)}
 											className={cn(
-												"h-12 px-4 font-medium",
+												"h-10 px-4 text-xs font-medium text-muted-foreground",
 												column.columnDef.meta?.headerClassName,
 											)}
 										>
@@ -126,7 +167,7 @@ export function DataTable<TData extends RowData>({
 												<button
 													type="button"
 													aria-label={`Sort by ${label}`}
-													className="inline-flex items-center gap-1 rounded-sm font-medium text-foreground hover:text-(--sea-ink-soft) focus-visible:outline-2 focus-visible:outline-ring"
+													className="group/sort -mx-1 inline-flex cursor-pointer items-center gap-1 rounded-sm px-1 font-medium transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
 													onClick={column.getToggleSortingHandler()}
 												>
 													{content}
@@ -143,33 +184,62 @@ export function DataTable<TData extends RowData>({
 					</TableHeader>
 					<TableBody>
 						{rows.length === 0 ? (
-							<TableRow>
+							<TableRow className="hover:bg-transparent">
 								<TableCell
 									colSpan={columns.length}
-									className="h-16 px-4 text-center text-sm text-muted-foreground"
+									className="h-24 px-4 text-center text-sm text-muted-foreground"
 								>
 									{emptyMessage}
 								</TableCell>
 							</TableRow>
 						) : (
-							rows.map((row) => (
-								<TableRow key={row.id} className="hover:bg-(--chip-bg)">
-									{row.getAllCells().map((cell) => (
-										<TableCell
-											key={cell.id}
-											className={cn(
-												"h-16 px-4",
-												cell.column.columnDef.meta?.cellClassName,
-											)}
-										>
-											{flexRender(
-												cell.column.columnDef.cell,
-												cell.getContext(),
-											)}
-										</TableCell>
-									))}
-								</TableRow>
-							))
+							rows.map((row, index) => {
+								const selected = isRowSelected?.(row.original) ?? false;
+								return (
+									<MotionTableRow
+										key={row.id}
+										initial={reduceMotion ? false : { opacity: 0, y: 4 }}
+										animate={{ opacity: 1, y: 0 }}
+										transition={{
+											duration: 0.2,
+											ease: easeOut,
+											delay: Math.min(index, MAX_STAGGERED_ROWS) * 0.025,
+										}}
+										data-state={selected ? "selected" : undefined}
+										aria-current={selected ? "true" : undefined}
+										className={cn(
+											"group/row hover:bg-muted/40",
+											onRowClick && "cursor-pointer",
+										)}
+										onClick={
+											onRowClick
+												? (event: MouseEvent<HTMLTableRowElement>) => {
+														if (fromInteractiveChild(event)) return;
+														onRowClick(row.original);
+													}
+												: undefined
+										}
+									>
+										{row.getAllCells().map((cell) => (
+											<TableCell
+												key={cell.id}
+												className={cn(
+													cellHeight,
+													"px-4",
+													cell.column.columnDef.meta?.cellClassName,
+												)}
+											>
+												{cell.column.columnDef.cell === undefined
+													? String(cell.getValue() ?? "")
+													: renderSlot(
+															cell.column.columnDef.cell,
+															cell.getContext(),
+														)}
+											</TableCell>
+										))}
+									</MotionTableRow>
+								);
+							})
 						)}
 					</TableBody>
 				</Table>

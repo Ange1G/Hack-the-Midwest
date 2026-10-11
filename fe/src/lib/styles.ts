@@ -1,15 +1,15 @@
-// Text links inside app content. The global `a` colour (--lagoon-deep) sits
-// below the WCAG AA 4.5:1 ratio on the light surfaces, so app links put the
-// text in --sea-ink and keep the accent in the underline. The `!` is needed
-// because the global rule is unlayered and would otherwise beat a utility.
+// Inline text links inside app content: body colour with an underline that
+// strengthens on hover, so links never depend on a palette colour for contrast.
 export const textLinkClass =
-	"font-medium text-(--sea-ink)! underline decoration-(--lagoon-deep) underline-offset-2 hover:decoration-2";
+	"font-medium text-foreground underline decoration-foreground/30 underline-offset-[3px] transition-colors hover:decoration-foreground focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring";
 
-// Primary links inside data tables. The global `a` rule always underlines and
-// paints --lagoon-deep; tables keep body text colour and skip decoration.
+// Primary links inside data tables: plain body text that underlines on hover.
 export const tableLinkClass =
-	"font-medium text-foreground! no-underline hover:text-(--lagoon-deep)! hover:no-underline";
+	"font-medium text-foreground underline-offset-[3px] hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring";
 
-// A Link rendered inside a primary <Button asChild>. Without this the global
-// `a` colour paints teal text on the violet button (1.7:1).
-export const buttonLinkClass = "text-(--primary-foreground)! no-underline";
+// A Link rendered inside <Button asChild>.
+export const buttonLinkClass = "no-underline";
+
+// "Back to …" link above a page title.
+export const backLinkClass =
+	"inline-flex items-center gap-1 rounded-sm transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring";

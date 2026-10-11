@@ -34,12 +34,14 @@ test("sign in, build an agent, run it, see an unsafe agent refused, then watch t
 		page.getByRole("heading", { name: "Uptime checker" }),
 	).toBeVisible();
 
-	// Run it and watch it finish.
+	// Run it and watch it finish in the inline run panel, with a toast.
+	const runPanel = page.getByRole("region", { name: "Run panel" });
 	await page.getByRole("button", { name: "Run agent" }).click();
-	await expect(page.getByText("Succeeded", { exact: true })).toBeVisible({
+	await expect(runPanel.getByText("Succeeded", { exact: true })).toBeVisible({
 		timeout: 15_000,
 	});
-	await expect(page.getByText(/all checks passed/)).toBeVisible();
+	await expect(runPanel.getByText(/all checks passed/)).toBeVisible();
+	await expect(page.getByText("Uptime checker finished")).toBeVisible();
 
 	// An inline connector that reaches for the cloud metadata endpoint is
 	// refused at save time, exactly as the backend refuses it.
@@ -75,12 +77,13 @@ test("sign in, build an agent, run it, see an unsafe agent refused, then watch t
 	).toBeVisible();
 	await page.getByRole("button", { name: "Run agent" }).click();
 
-	const alert = page.getByRole("alert");
+	const alert = runPanel.getByRole("alert");
 	await expect(alert).toContainText("Terminated by the security monitor", {
 		timeout: 15_000,
 	});
 	await expect(alert).toContainText("untrusted destination");
-	await expect(page.getByText("Failed", { exact: true })).toBeVisible();
+	await expect(runPanel.getByText("Failed", { exact: true })).toBeVisible();
+	await expect(page.getByText("Secret leaker failed")).toBeVisible();
 
 	await page.getByRole("link", { name: "Security" }).click();
 	await expect(

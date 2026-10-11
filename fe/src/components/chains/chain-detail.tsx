@@ -1,13 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { Loader2Icon, PlayIcon } from "lucide-react";
 import { useState } from "react";
 import { DataTable, type DataTableColumn } from "#/components/data-table";
-import { PageHeader } from "#/components/layout/page";
+import { PageHeader, Section } from "#/components/layout/page";
 import { Notice } from "#/components/notice";
+import { RelativeTime } from "#/components/relative-time";
 import { EmptyState, ErrorState, LoadingState } from "#/components/states";
 import { StatusBadge } from "#/components/status-badge";
 import { Button } from "#/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "#/components/ui/card";
 import { Label } from "#/components/ui/label";
 import { Textarea } from "#/components/ui/textarea";
 import {
@@ -17,6 +18,7 @@ import {
 	useStartChainRun,
 } from "#/lib/api/queries";
 import type { ChainRun, ChainStepRead } from "#/lib/api/schemas";
+import { notify } from "#/lib/feedback";
 import { formatDateTime } from "#/lib/format";
 import { minutesToTime } from "#/lib/http-contract";
 import { tableLinkClass, textLinkClass } from "#/lib/styles";
@@ -70,9 +72,10 @@ export function ChainDetail({
 			accessorFn: (row) => row.started_at,
 			header: "Started",
 			cell: ({ row }) => (
-				<span className="text-sm text-muted-foreground">
-					{formatDateTime(row.original.started_at)}
-				</span>
+				<RelativeTime
+					iso={row.original.started_at}
+					className="text-sm text-muted-foreground"
+				/>
 			),
 		},
 		{
@@ -97,7 +100,7 @@ export function ChainDetail({
 				title={data.title}
 				description={`Created ${formatDateTime(data.created_at)}`}
 				action={
-					<div className="flex w-full max-w-sm flex-col gap-2">
+					<div className="flex w-full max-w-sm flex-col items-stretch gap-2">
 						<Label htmlFor="chain-run-input">Run input (optional)</Label>
 						<Textarea
 							id="chain-run-input"
@@ -112,10 +115,24 @@ export function ChainDetail({
 							onClick={() =>
 								startRun.mutate(
 									{ input: runInput },
-									{ onSuccess: (run) => onRunStarted(run) },
+									{
+										onSuccess: (run) => {
+											notify.success("Chain run started", {
+												description: data.title,
+											});
+											onRunStarted(run);
+										},
+										onError: (error) =>
+											notify.error("Could not start the chain", error),
+									},
 								)
 							}
 						>
+							{startRun.isPending ? (
+								<Loader2Icon className="animate-spin" aria-hidden="true" />
+							) : (
+								<PlayIcon aria-hidden="true" />
+							)}
 							{startRun.isPending ? "Starting…" : "Run chain"}
 						</Button>
 					</div>
@@ -133,35 +150,22 @@ export function ChainDetail({
 			) : null}
 
 			<div className="space-y-6">
-				<Card className="island-shell">
-					<CardHeader>
-						<CardTitle>Steps</CardTitle>
-					</CardHeader>
-					<CardContent>
-						<ol className="space-y-3">
-							{data.steps.map((step) => (
-								<StepRow
-									key={`${step.position}-${step.agent_id}`}
-									step={step}
-									title={titleFor(step.agent_id)}
-								/>
-							))}
-						</ol>
-					</CardContent>
-				</Card>
-				<Card className="island-shell">
-					<CardHeader>
-						<CardTitle>Schedule</CardTitle>
-					</CardHeader>
-					<CardContent>
-						<ScheduleSummary schedule={data.schedule} />
-					</CardContent>
-				</Card>
+				<Section title="Steps" contentClassName="p-0">
+					<ol className="divide-y">
+						{data.steps.map((step) => (
+							<StepRow
+								key={`${step.position}-${step.agent_id}`}
+								step={step}
+								title={titleFor(step.agent_id)}
+							/>
+						))}
+					</ol>
+				</Section>
+				<Section title="Schedule">
+					<ScheduleSummary schedule={data.schedule} />
+				</Section>
 				<section aria-labelledby="session-runs-heading">
-					<h2
-						id="session-runs-heading"
-						className="mb-3 text-base font-semibold"
-					>
+					<h2 id="session-runs-heading" className="mb-3 text-sm font-medium">
 						Runs this session
 					</h2>
 					{sessionRuns.data.length === 0 ? (
@@ -184,8 +188,14 @@ export function ChainDetail({
 
 function StepRow({ step, title }: { step: ChainStepRead; title: string }) {
 	return (
-		<li className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
-			<span className="font-medium">Step {step.position + 1}</span>
+		<li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-sm">
+			<span
+				aria-hidden="true"
+				className="flex size-6 items-center justify-center rounded-full border bg-background text-xs font-medium tabular-nums"
+			>
+				{step.position + 1}
+			</span>
+			<span className="sr-only">Step {step.position + 1}</span>
 			<Link
 				to="/agents/$agentId"
 				params={{ agentId: step.agent_id }}

@@ -1,4 +1,5 @@
 import { useForm } from "@tanstack/react-form";
+import { Loader2Icon } from "lucide-react";
 import { FieldErrors, fieldErrorMessages } from "#/components/form-field";
 import { Button } from "#/components/ui/button";
 import { Input } from "#/components/ui/input";
@@ -59,6 +60,9 @@ export function SignInForm({ onSuccess }: { onSuccess: (user: User) => void }) {
 			) : null}
 
 			<Button type="submit" className="w-full" disabled={signIn.isPending}>
+				{signIn.isPending ? (
+					<Loader2Icon className="animate-spin" aria-hidden="true" />
+				) : null}
 				{signIn.isPending ? "Checking…" : "Sign in"}
 			</Button>
 		</form>

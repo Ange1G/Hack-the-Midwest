@@ -1,5 +1,7 @@
 import { useForm } from "@tanstack/react-form";
 import { useQueryClient } from "@tanstack/react-query";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { LinkIcon, Loader2Icon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
 	buildConnectorBody,
@@ -13,6 +15,7 @@ import {
 	type McpDraft,
 } from "#/components/connectors/connector-fields";
 import { FieldErrors, fieldErrorMessages } from "#/components/form-field";
+import { Section } from "#/components/layout/page";
 import {
 	parseScheduleTimes,
 	type ScheduleDraft,
@@ -46,7 +49,10 @@ import {
 	type ConnectorType,
 	connectorLabel,
 } from "#/lib/api/schemas";
+import { notify } from "#/lib/feedback";
 import { minutesToTime } from "#/lib/http-contract";
+import { transitionBase } from "#/lib/motion";
+import { cn } from "#/lib/utils";
 
 type Attachment = {
 	key: number;
@@ -295,12 +301,21 @@ export function AgentForm({
 				if (agent) {
 					updateAgent.mutate(
 						{ id: agent.id, ...parsed.data },
-						{ onSuccess: (saved) => onSaved(saved), onError },
+						{
+							onSuccess: (saved) => {
+								notify.success("Changes saved", { description: saved.title });
+								onSaved(saved);
+							},
+							onError,
+						},
 					);
 					return;
 				}
 				createAgent.mutate(parsed.data, {
-					onSuccess: (saved) => onSaved(saved),
+					onSuccess: (saved) => {
+						notify.success("Agent created", { description: saved.title });
+						onSaved(saved);
+					},
 					onError,
 				});
 			} catch (error) {
@@ -320,18 +335,50 @@ export function AgentForm({
 			!attachments.some((attachment) => attachment.connectorId === item.id),
 	);
 	const pending = saving || createAgent.isPending || updateAgent.isPending;
+	const reduceMotion = useReducedMotion();
+
+	const toolsField = (
+		attachment: Attachment,
+		idPrefix: string,
+		error: string | undefined,
+	) => (
+		<div className="space-y-1.5">
+			<Label htmlFor={`${idPrefix}-tools`}>
+				Allowed tools (comma separated)
+			</Label>
+			<Input
+				id={`${idPrefix}-tools`}
+				placeholder="search_issues, get_issue"
+				className="font-mono text-xs"
+				value={attachment.allowedTools}
+				onChange={(event) =>
+					setAttachments((previous) =>
+						patchAttachment(previous, attachment.key, {
+							allowedTools: event.target.value,
+						}),
+					)
+				}
+				aria-invalid={Boolean(error)}
+			/>
+			{error ? <p className="text-sm text-destructive">{error}</p> : null}
+		</div>
+	);
 
 	return (
 		<form
 			noValidate
-			className="max-w-2xl space-y-8"
+			className="max-w-3xl space-y-6"
 			onSubmit={(event) => {
 				event.preventDefault();
 				event.stopPropagation();
 				void form.handleSubmit();
 			}}
 		>
-			<div className="space-y-4">
+			<Section
+				title="General"
+				description="What the agent is called and what it should do."
+				contentClassName="space-y-4"
+			>
 				<form.Field
 					name="name"
 					validators={{ onSubmit: agentInputSchema.shape.agentTitle }}
@@ -364,7 +411,7 @@ export function AgentForm({
 							<Textarea
 								id="agent-instructions"
 								name={field.name}
-								rows={5}
+								rows={6}
 								placeholder="What should this agent do, in plain English?"
 								value={field.state.value}
 								onBlur={field.handleBlur}
@@ -376,233 +423,215 @@ export function AgentForm({
 						</div>
 					)}
 				</form.Field>
-			</div>
+			</Section>
 
-			<section className="space-y-3" aria-labelledby="connectors-heading">
-				<div>
-					<h2 id="connectors-heading" className="text-base font-semibold">
-						Connectors
-					</h2>
-					<p className="text-sm text-muted-foreground">
-						Create HTTP, MCP, or database tools here, or attach ones you already
-						saved. MCP connectors need an allowlist of tools this agent may
-						call.
-					</p>
-				</div>
-				{attachments.map((attachment, index) => {
-					const connector = (connectors.data ?? []).find(
-						(item) => item.id === attachment.connectorId,
-					);
-					const fieldErrors = errorsForIndex(errors, index);
-					const idPrefix = `attachment-${attachment.key}`;
-					return (
-						<fieldset
-							key={attachment.key}
-							className="island-shell space-y-4 rounded-xl p-4"
-						>
-							<legend className="px-1 font-medium">
-								Connector {index + 1}
-							</legend>
-							<div className="flex flex-wrap items-center justify-between gap-2">
-								<div className="flex flex-wrap gap-2">
-									<Button
-										type="button"
-										variant={
-											attachment.mode === "create" ? "secondary" : "outline"
-										}
-										size="sm"
-										onClick={() =>
-											setAttachments((previous) =>
-												patchAttachment(previous, attachment.key, {
-													mode: "create",
-													connectorId: "",
-												}),
-											)
-										}
-									>
-										Create new
-									</Button>
-									<Button
-										type="button"
-										variant={
-											attachment.mode === "library" ? "secondary" : "outline"
-										}
-										size="sm"
-										onClick={() =>
-											setAttachments((previous) =>
-												patchAttachment(previous, attachment.key, {
-													mode: "library",
-												}),
-											)
-										}
-									>
-										Use existing
-									</Button>
-								</div>
-								<Button
-									type="button"
-									variant="outline"
-									size="sm"
-									onClick={() =>
-										setAttachments((previous) =>
-											previous.filter((item) => item.key !== attachment.key),
-										)
-									}
-								>
-									Remove connector {index + 1}
-								</Button>
-							</div>
-
-							{attachment.mode === "create" ? (
-								<div className="space-y-4">
-									<ConnectorTypePicker
-										value={attachment.createType}
-										onChange={(createType) =>
-											setAttachments((previous) =>
-												patchAttachment(previous, attachment.key, {
-													createType,
-												}),
-											)
-										}
-										catalog={catalog.data}
-										name={`${idPrefix}-type`}
-										idPrefix={idPrefix}
-									/>
-									<ConnectorDraftFields
-										type={attachment.createType}
-										http={attachment.http}
-										mcp={attachment.mcp}
-										database={attachment.database}
-										onHttp={(http) =>
-											setAttachments((previous) =>
-												patchAttachment(previous, attachment.key, { http }),
-											)
-										}
-										onMcp={(mcp) =>
-											setAttachments((previous) =>
-												patchAttachment(previous, attachment.key, { mcp }),
-											)
-										}
-										onDatabase={(database) =>
-											setAttachments((previous) =>
-												patchAttachment(previous, attachment.key, { database }),
-											)
-										}
-										errors={fieldErrors}
-										idPrefix={idPrefix}
-									/>
-									{attachment.createType === "mcp" ? (
-										<div className="space-y-1.5">
-											<Label htmlFor={`${idPrefix}-tools`}>
-												Allowed tools (comma separated)
-											</Label>
-											<Input
-												id={`${idPrefix}-tools`}
-												placeholder="search_issues, get_issue"
-												value={attachment.allowedTools}
-												onChange={(event) =>
-													setAttachments((previous) =>
-														patchAttachment(previous, attachment.key, {
-															allowedTools: event.target.value,
-														}),
-													)
-												}
-												aria-invalid={Boolean(fieldErrors.allowedTools)}
-											/>
-											{fieldErrors.allowedTools ? (
-												<p className="text-sm text-destructive">
-													{fieldErrors.allowedTools}
-												</p>
-											) : null}
+			<Section
+				title="Connectors"
+				description="Create HTTP, MCP, or database tools here, or attach ones you already saved. MCP connectors need an allowlist of tools this agent may call."
+				contentClassName="space-y-4"
+			>
+				<AnimatePresence initial={false}>
+					{attachments.map((attachment, index) => {
+						const connector = (connectors.data ?? []).find(
+							(item) => item.id === attachment.connectorId,
+						);
+						const fieldErrors = errorsForIndex(errors, index);
+						const idPrefix = `attachment-${attachment.key}`;
+						return (
+							<motion.div
+								key={attachment.key}
+								initial={reduceMotion ? false : { opacity: 0, y: -4 }}
+								animate={{ opacity: 1, y: 0 }}
+								exit={reduceMotion ? undefined : { opacity: 0, scale: 0.98 }}
+								transition={transitionBase}
+							>
+								<fieldset className="space-y-4 rounded-lg border bg-background p-4">
+									<legend className="sr-only">Connector {index + 1}</legend>
+									<div className="flex flex-wrap items-center justify-between gap-2">
+										<div className="flex items-center gap-3">
+											<span className="text-sm font-medium" aria-hidden="true">
+												Connector {index + 1}
+											</span>
+											<div className="inline-flex rounded-md border bg-muted p-0.5">
+												{(
+													[
+														["create", "Create new"],
+														["library", "Use existing"],
+													] as const
+												).map(([mode, label]) => (
+													<button
+														key={mode}
+														type="button"
+														aria-pressed={attachment.mode === mode}
+														className={cn(
+															"cursor-pointer rounded-[5px] px-2.5 py-1 text-xs font-medium text-muted-foreground transition-[color,background-color,box-shadow] duration-150 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring",
+															attachment.mode === mode &&
+																"bg-background text-foreground shadow-xs",
+														)}
+														onClick={() =>
+															setAttachments((previous) =>
+																patchAttachment(
+																	previous,
+																	attachment.key,
+																	mode === "create"
+																		? { mode, connectorId: "" }
+																		: { mode },
+																),
+															)
+														}
+													>
+														{label}
+													</button>
+												))}
+											</div>
 										</div>
-									) : null}
-								</div>
-							) : (
-								<div className="space-y-4">
-									<div className="space-y-1.5">
-										<Label htmlFor={idPrefix}>Connector</Label>
-										<Select
-											value={attachment.connectorId}
-											onValueChange={(connectorId) =>
+										<Button
+											type="button"
+											variant="ghost"
+											size="icon-sm"
+											aria-label={`Remove connector ${index + 1}`}
+											className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+											onClick={() =>
 												setAttachments((previous) =>
-													patchAttachment(previous, attachment.key, {
-														connectorId,
-													}),
+													previous.filter(
+														(item) => item.key !== attachment.key,
+													),
 												)
 											}
 										>
-											<SelectTrigger
-												id={idPrefix}
-												className="w-full"
-												aria-invalid={Boolean(fieldErrors.connectorId)}
-											>
-												<SelectValue placeholder="Choose a connector" />
-											</SelectTrigger>
-											<SelectContent>
-												{connector ? (
-													<SelectItem value={connector.id}>
-														{connector.name} ({connectorLabel(connector.type)})
-													</SelectItem>
-												) : null}
-												{available.map((item) => (
-													<SelectItem key={item.id} value={item.id}>
-														{item.name} ({connectorLabel(item.type)})
-													</SelectItem>
-												))}
-											</SelectContent>
-										</Select>
-										{fieldErrors.connectorId ? (
-											<p className="text-sm text-destructive">
-												{fieldErrors.connectorId}
-											</p>
-										) : null}
+											<Trash2Icon aria-hidden="true" />
+										</Button>
 									</div>
-									{connector ? (
-										<p className="text-sm text-muted-foreground">
-											<ToneBadge
-												tone={connector.type === "http" ? "neutral" : "info"}
-											>
-												{connectorLabel(connector.type)}
-											</ToneBadge>
-										</p>
-									) : null}
-									{connector?.type === "mcp" ? (
-										<div className="space-y-1.5">
-											<Label htmlFor={`${idPrefix}-tools`}>
-												Allowed tools (comma separated)
-											</Label>
-											<Input
-												id={`${idPrefix}-tools`}
-												placeholder="search_issues, get_issue"
-												value={attachment.allowedTools}
-												onChange={(event) =>
+
+									{attachment.mode === "create" ? (
+										<div className="space-y-4">
+											<ConnectorTypePicker
+												value={attachment.createType}
+												onChange={(createType) =>
 													setAttachments((previous) =>
 														patchAttachment(previous, attachment.key, {
-															allowedTools: event.target.value,
+															createType,
 														}),
 													)
 												}
-												aria-invalid={Boolean(fieldErrors.allowedTools)}
+												catalog={catalog.data}
+												name={`${idPrefix}-type`}
+												idPrefix={idPrefix}
 											/>
-											{fieldErrors.allowedTools ? (
-												<p className="text-sm text-destructive">
-													{fieldErrors.allowedTools}
+											<ConnectorDraftFields
+												type={attachment.createType}
+												http={attachment.http}
+												mcp={attachment.mcp}
+												database={attachment.database}
+												onHttp={(http) =>
+													setAttachments((previous) =>
+														patchAttachment(previous, attachment.key, { http }),
+													)
+												}
+												onMcp={(mcp) =>
+													setAttachments((previous) =>
+														patchAttachment(previous, attachment.key, { mcp }),
+													)
+												}
+												onDatabase={(database) =>
+													setAttachments((previous) =>
+														patchAttachment(previous, attachment.key, {
+															database,
+														}),
+													)
+												}
+												errors={fieldErrors}
+												idPrefix={idPrefix}
+											/>
+											{attachment.createType === "mcp"
+												? toolsField(
+														attachment,
+														idPrefix,
+														fieldErrors.allowedTools,
+													)
+												: null}
+										</div>
+									) : (
+										<div className="space-y-4">
+											<div className="space-y-1.5">
+												<Label htmlFor={idPrefix}>Connector</Label>
+												<Select
+													value={attachment.connectorId}
+													onValueChange={(connectorId) =>
+														setAttachments((previous) =>
+															patchAttachment(previous, attachment.key, {
+																connectorId,
+															}),
+														)
+													}
+												>
+													<SelectTrigger
+														id={idPrefix}
+														className="w-full"
+														aria-invalid={Boolean(fieldErrors.connectorId)}
+													>
+														<SelectValue placeholder="Choose a connector" />
+													</SelectTrigger>
+													<SelectContent>
+														{connector ? (
+															<SelectItem value={connector.id}>
+																{connector.name} (
+																{connectorLabel(connector.type)})
+															</SelectItem>
+														) : null}
+														{available.map((item) => (
+															<SelectItem key={item.id} value={item.id}>
+																{item.name} ({connectorLabel(item.type)})
+															</SelectItem>
+														))}
+													</SelectContent>
+												</Select>
+												{fieldErrors.connectorId ? (
+													<p className="text-sm text-destructive">
+														{fieldErrors.connectorId}
+													</p>
+												) : null}
+											</div>
+											{connector ? (
+												<p className="text-sm text-muted-foreground">
+													<ToneBadge
+														tone={
+															connector.type === "http" ? "neutral" : "info"
+														}
+													>
+														{connectorLabel(connector.type)}
+													</ToneBadge>
 												</p>
 											) : null}
+											{connector?.type === "mcp"
+												? toolsField(
+														attachment,
+														idPrefix,
+														fieldErrors.allowedTools,
+													)
+												: null}
 										</div>
+									)}
+									{fieldErrors.form ? (
+										<p className="text-sm text-destructive">
+											{fieldErrors.form}
+										</p>
 									) : null}
-								</div>
-							)}
-							{fieldErrors.form ? (
-								<p className="text-sm text-destructive">{fieldErrors.form}</p>
-							) : null}
-						</fieldset>
-					);
-				})}
+								</fieldset>
+							</motion.div>
+						);
+					})}
+				</AnimatePresence>
+				{attachments.length === 0 ? (
+					<p className="rounded-md border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
+						No connectors yet. The agent can still run with instructions only.
+					</p>
+				) : null}
 				<div className="flex flex-wrap gap-2">
 					<Button
 						type="button"
 						variant="outline"
+						size="sm"
 						onClick={() =>
 							setAttachments((previous) => [
 								...previous,
@@ -610,11 +639,13 @@ export function AgentForm({
 							])
 						}
 					>
+						<PlusIcon aria-hidden="true" />
 						Create connector
 					</Button>
 					<Button
 						type="button"
 						variant="outline"
+						size="sm"
 						onClick={() =>
 							setAttachments((previous) => [
 								...previous,
@@ -622,42 +653,54 @@ export function AgentForm({
 							])
 						}
 					>
+						<LinkIcon aria-hidden="true" />
 						Attach connector
 					</Button>
 				</div>
-			</section>
+			</Section>
 
-			<ScheduleFields
-				value={schedule}
-				onChange={setSchedule}
-				errors={{
-					days: errors["schedule.days"],
-					times: errors["schedule.times"],
-					month: errors["schedule.month"],
-				}}
-			/>
+			<Section
+				title="Schedule"
+				description="Optional. Leave empty to run only on demand."
+			>
+				<ScheduleFields
+					value={schedule}
+					onChange={setSchedule}
+					errors={{
+						days: errors["schedule.days"],
+						times: errors["schedule.times"],
+						month: errors["schedule.month"],
+					}}
+				/>
+			</Section>
 
-			{errors.form ? (
-				<p role="alert" className="text-sm text-destructive">
-					{errors.form}
-				</p>
-			) : null}
-			{requestError &&
-			!(requestError instanceof ApiError && requestError.fields) ? (
-				<p role="alert" className="text-sm text-destructive">
-					{requestError.message}
-				</p>
-			) : null}
-
-			<Button type="submit" disabled={pending}>
-				{pending
-					? agent
-						? "Saving…"
-						: "Creating…"
-					: agent
-						? "Save changes"
-						: "Create agent"}
-			</Button>
+			<div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap items-center justify-end gap-3 border-t bg-background/85 px-1 py-4 backdrop-blur-sm">
+				<div className="mr-auto min-w-0">
+					{errors.form ? (
+						<p role="alert" className="text-sm text-destructive">
+							{errors.form}
+						</p>
+					) : null}
+					{requestError &&
+					!(requestError instanceof ApiError && requestError.fields) ? (
+						<p role="alert" className="text-sm text-destructive">
+							{requestError.message}
+						</p>
+					) : null}
+				</div>
+				<Button type="submit" disabled={pending}>
+					{pending ? (
+						<Loader2Icon className="animate-spin" aria-hidden="true" />
+					) : null}
+					{pending
+						? agent
+							? "Saving…"
+							: "Creating…"
+						: agent
+							? "Save changes"
+							: "Create agent"}
+				</Button>
+			</div>
 		</form>
 	);
 }

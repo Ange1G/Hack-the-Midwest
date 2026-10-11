@@ -4,14 +4,28 @@ import { StatusBadge } from "./status-badge";
 import { ToneBadge } from "./tone-badge";
 
 describe("ToneBadge", () => {
-	it("renders label text with a status dot instead of a pill border", () => {
+	it("renders label text in the foreground colour with a tone dot", () => {
 		const { container } = render(<ToneBadge tone="danger">Flagged</ToneBadge>);
 
 		expect(screen.getByText("Flagged")).toBeInTheDocument();
-		expect(container.querySelector(".rounded-full.border")).toBeNull();
+		expect(container.firstElementChild).toHaveClass("text-foreground");
 		expect(container.querySelector("[aria-hidden='true']")).toHaveClass(
-			"bg-(--destructive)",
+			"bg-destructive",
 		);
+	});
+
+	it("pulses the dot only when asked", () => {
+		const { container, rerender } = render(
+			<ToneBadge tone="info">Running</ToneBadge>,
+		);
+		const dot = () => container.querySelector("[aria-hidden='true']");
+		expect(dot()).not.toHaveClass("motion-safe:animate-status-pulse");
+		rerender(
+			<ToneBadge tone="info" pulse>
+				Running
+			</ToneBadge>,
+		);
+		expect(dot()).toHaveClass("motion-safe:animate-status-pulse");
 	});
 });
 

@@ -1,9 +1,10 @@
 import { Link, useNavigate } from "@tanstack/react-router";
+import { ArrowLeftIcon } from "lucide-react";
 import { AgentForm } from "#/components/agents/agent-form";
 import { PageHeader } from "#/components/layout/page";
 import { ErrorState, LoadingState } from "#/components/states";
 import { useAgent } from "#/lib/api/queries";
-import { textLinkClass } from "#/lib/styles";
+import { backLinkClass } from "#/lib/styles";
 
 export function AgentEdit({ agentId }: { agentId: string }) {
 	const agent = useAgent(agentId);
@@ -27,12 +28,13 @@ export function AgentEdit({ agentId }: { agentId: string }) {
 			<PageHeader
 				title="Edit configuration"
 				description={agent.data.title}
-				action={
+				eyebrow={
 					<Link
 						to="/agents/$agentId"
 						params={{ agentId }}
-						className={textLinkClass}
+						className={backLinkClass}
 					>
+						<ArrowLeftIcon className="size-3.5" aria-hidden="true" />
 						Back to agent
 					</Link>
 				}

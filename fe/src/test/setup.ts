@@ -1,7 +1,9 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
+import { toast } from "sonner";
 import { afterAll, afterEach, beforeAll } from "vitest";
 import { clearSessionUser } from "#/lib/api/session";
+import { resetWatchedRuns } from "#/lib/run-watch";
 import { server } from "#/mocks/server";
 import { resetMockState } from "#/mocks/state";
 
@@ -57,8 +59,10 @@ afterEach(() => {
 	server.resetHandlers();
 	server.events.removeAllListeners();
 	resetMockState();
+	resetWatchedRuns();
 	clearSessionUser();
 	cleanup();
+	toast.dismiss();
 });
 
 afterAll(() => {

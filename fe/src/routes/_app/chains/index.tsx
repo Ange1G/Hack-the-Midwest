@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { PlusIcon } from "lucide-react";
 import { ChainList } from "#/components/chains/chain-list";
 import { PageHeader } from "#/components/layout/page";
 import { Button } from "#/components/ui/button";
@@ -17,6 +18,7 @@ function ChainsPage() {
 				action={
 					<Button asChild>
 						<Link to="/chains/new" className={buttonLinkClass}>
+							<PlusIcon aria-hidden="true" />
 							New chain
 						</Link>
 					</Button>

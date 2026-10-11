@@ -33,9 +33,7 @@ function seedAgent() {
 describe("AgentDetail", () => {
 	it("shows the agent's name, instructions, HTTP calls, and schedule", async () => {
 		const agent = seedAgent();
-		renderWithProviders(
-			<AgentDetail agentId={agent.id} onRunStarted={vi.fn()} />,
-		);
+		renderWithProviders(<AgentDetail agentId={agent.id} />);
 
 		expect(
 			await screen.findByRole("heading", { name: "Uptime checker" }),
@@ -44,7 +42,7 @@ describe("AgentDetail", () => {
 			screen.getByText("Check the status page and summarise it."),
 		).toBeInTheDocument();
 
-		const call = screen.getByRole("group", { name: "status" });
+		const call = await screen.findByRole("group", { name: "status" });
 		expect(within(call).getByText("GET")).toBeInTheDocument();
 		expect(
 			within(call).getByText("https://status.example.com/api/v2/status.json"),
@@ -60,12 +58,16 @@ describe("AgentDetail", () => {
 		expect(screen.getByText(/09:00, 17:00/i)).toBeInTheDocument();
 	});
 
-	it("starts a run with the optional input", async () => {
+	it("starts a run with the optional input and shows its output without leaving the page", async () => {
 		const agent = seedAgent();
 		const user = userEvent.setup();
-		const onRunStarted = vi.fn();
+		const onRunChange = vi.fn();
 		renderWithProviders(
-			<AgentDetail agentId={agent.id} onRunStarted={onRunStarted} />,
+			<AgentDetail
+				agentId={agent.id}
+				onRunChange={onRunChange}
+				pollIntervalMs={5}
+			/>,
 		);
 
 		await user.type(
@@ -74,47 +76,75 @@ describe("AgentDetail", () => {
 		);
 		await user.click(screen.getByRole("button", { name: /run agent/i }));
 
-		await waitFor(() =>
-			expect(onRunStarted).toHaveBeenCalledWith(
-				expect.objectContaining({
-					status: "queued",
-					agent_id: agent.id,
-					input: "ticket INC-42",
-				}),
+		await waitFor(() => expect(mockState.runs).toHaveLength(1));
+		const run = mockState.runs[0];
+		expect(run).toMatchObject({ agent_id: agent.id, input: "ticket INC-42" });
+		expect(onRunChange).toHaveBeenCalledWith(run?.id);
+
+		const panel = screen.getByRole("region", { name: "Run panel" });
+		expect(
+			await within(panel).findByText(
+				/all checks passed/i,
+				{},
+				{ timeout: 4000 },
 			),
-		);
+		).toBeInTheDocument();
+		expect(within(panel).getByText("Succeeded")).toBeInTheDocument();
+		expect(within(panel).getByText("ticket INC-42")).toBeInTheDocument();
 	});
 
-	it("starts a run and reports it", async () => {
+	it("shows the latest run's output with no extra clicks", async () => {
 		const agent = seedAgent();
+		runToCompletion(createRun(agent));
+		renderWithProviders(<AgentDetail agentId={agent.id} />);
+
+		const panel = await screen.findByRole("region", { name: "Run panel" });
+		expect(
+			await within(panel).findByText(/all checks passed/i),
+		).toBeInTheDocument();
+	});
+
+	it("loads a past run into the panel when it is picked from the history", async () => {
+		const agent = seedAgent();
+		runToCompletion(createRun(agent, "first"));
+		runToCompletion(createRun(agent, "second"));
 		const user = userEvent.setup();
-		const onRunStarted = vi.fn();
+		const onRunChange = vi.fn();
 		renderWithProviders(
-			<AgentDetail agentId={agent.id} onRunStarted={onRunStarted} />,
+			<AgentDetail agentId={agent.id} onRunChange={onRunChange} />,
 		);
 
-		await user.click(await screen.findByRole("button", { name: /run agent/i }));
+		const panel = await screen.findByRole("region", { name: "Run panel" });
+		const shown = (await within(panel).findByText(/^(first|second)$/))
+			.textContent;
+		const other = shown === "first" ? "second" : "first";
 
+		const table = await screen.findByRole("table", {
+			name: "Runs of this agent",
+		});
+		const rows = within(table).getAllByRole("row").slice(1);
+		const otherRow = rows.find((row) => !row.hasAttribute("aria-current"));
+		if (!otherRow) throw new Error("expected an unselected run row");
+		await user.click(
+			within(otherRow).getByRole("button", { name: "Show output" }),
+		);
+
+		expect(await within(panel).findByText(other)).toBeInTheDocument();
+		expect(onRunChange).toHaveBeenCalledOnce();
 		await waitFor(() =>
-			expect(onRunStarted).toHaveBeenCalledWith(
-				expect.objectContaining({ status: "queued", agent_id: agent.id }),
-			),
+			expect(otherRow).toHaveAttribute("aria-current", "true"),
 		);
-		expect(mockState.runs).toHaveLength(1);
 	});
 
 	it("lists previous runs with links to their pages", async () => {
 		const agent = seedAgent();
 		const run = createRun(agent);
 		runToCompletion(run);
-		const user = userEvent.setup();
-		renderWithProviders(
-			<AgentDetail agentId={agent.id} onRunStarted={vi.fn()} />,
-		);
+		renderWithProviders(<AgentDetail agentId={agent.id} />);
 
-		await user.click(await screen.findByRole("tab", { name: /runs/i }));
-
-		const table = await screen.findByRole("table");
+		const table = await screen.findByRole("table", {
+			name: "Runs of this agent",
+		});
 		const row = within(table)
 			.getByText(/succeeded/i)
 			.closest("tr");
@@ -126,9 +156,7 @@ describe("AgentDetail", () => {
 
 	it("shows an error state when the agent does not exist", async () => {
 		signInAs();
-		renderWithProviders(
-			<AgentDetail agentId="agt_missing" onRunStarted={vi.fn()} />,
-		);
+		renderWithProviders(<AgentDetail agentId="agt_missing" />);
 
 		expect(await screen.findByRole("alert")).toHaveTextContent(/not found/i);
 	});

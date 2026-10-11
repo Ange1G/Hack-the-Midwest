@@ -69,10 +69,12 @@ test("signed-in screens have no serious accessibility violations", async ({
 	await expect(
 		page.getByRole("heading", { name: "Secret leaker" }),
 	).toBeVisible();
-	await expectAccessible(page, "agent detail");
+	await expect(
+		page.getByRole("region", { name: "Run panel" }).getByRole("alert"),
+	).toContainText("Terminated by the security monitor");
+	await expectAccessible(page, "agent detail with failed run");
 
-	await page.getByRole("tab", { name: "Runs" }).click();
-	await page.getByRole("link", { name: "View" }).first().click();
+	await page.getByRole("link", { name: "View run" }).first().click();
 	await expect(page.getByRole("alert")).toContainText(
 		"Terminated by the security monitor",
 	);

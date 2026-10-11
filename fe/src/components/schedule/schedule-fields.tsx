@@ -67,15 +67,7 @@ export function ScheduleFields({
 	idPrefix?: string;
 }) {
 	return (
-		<section className="space-y-3" aria-labelledby={`${idPrefix}-heading`}>
-			<div>
-				<h2 id={`${idPrefix}-heading`} className="text-base font-semibold">
-					Schedule
-				</h2>
-				<p className="text-sm text-muted-foreground">
-					Optional. Leave empty to run only on demand.
-				</p>
-			</div>
+		<div className="space-y-4">
 			<fieldset className="space-y-2">
 				<legend className="text-sm font-medium">Run on</legend>
 				<div className="flex flex-wrap gap-4">
@@ -138,6 +130,6 @@ export function ScheduleFields({
 					<FieldError message={errors?.month} />
 				</div>
 			</div>
-		</section>
+		</div>
 	);
 }

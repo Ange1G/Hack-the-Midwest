@@ -1,12 +1,13 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { ArrowLeftIcon, ChevronRightIcon, Loader2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { PageHeader } from "#/components/layout/page";
+import { PageHeader, Section } from "#/components/layout/page";
 import { Notice } from "#/components/notice";
+import { OutputBlock } from "#/components/runs/output-block";
 import { ErrorState, LoadingState } from "#/components/states";
 import { StatusBadge } from "#/components/status-badge";
 import { Button } from "#/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "#/components/ui/card";
 import {
 	Collapsible,
 	CollapsibleContent,
@@ -22,7 +23,7 @@ import {
 } from "#/lib/api/queries";
 import type { ChainRunStep } from "#/lib/api/schemas";
 import { formatDateTime } from "#/lib/format";
-import { textLinkClass } from "#/lib/styles";
+import { backLinkClass, textLinkClass } from "#/lib/styles";
 
 export function ChainRunView({
 	chainRunId,
@@ -71,8 +72,18 @@ export function ChainRunView({
 		<>
 			<PageHeader
 				title={chain.data?.title ?? "Chain run"}
-				description={`Run ${data.id}`}
-				action={<StatusBadge status={data.status} />}
+				description={<span className="font-mono text-xs">{data.id}</span>}
+				meta={<StatusBadge status={data.status} />}
+				eyebrow={
+					<Link
+						to="/chains/$chainId"
+						params={{ chainId: data.chain_id }}
+						className={backLinkClass}
+					>
+						<ArrowLeftIcon className="size-3.5" aria-hidden="true" />
+						Back to chain
+					</Link>
+				}
 			/>
 
 			{data.status === "failed" && data.error_message ? (
@@ -87,38 +98,30 @@ export function ChainRunView({
 			) : null}
 
 			{data.input ? (
-				<Card className="island-shell mb-6">
-					<CardHeader>
-						<CardTitle>Run input</CardTitle>
-					</CardHeader>
-					<CardContent>
-						<pre className="whitespace-pre-wrap text-sm">{data.input}</pre>
-					</CardContent>
-				</Card>
+				<Section title="Run input" className="mb-6">
+					<OutputBlock label="Run input" value={data.input} />
+				</Section>
 			) : null}
 
-			<Card className="island-shell">
-				<CardHeader>
-					<CardTitle>Final result</CardTitle>
-				</CardHeader>
-				<CardContent>
-					{output ? (
-						<pre className="whitespace-pre-wrap text-sm">{output}</pre>
-					) : (
-						<p className="text-sm text-muted-foreground">
-							{live
-								? "Waiting for the last step to finish…"
-								: "No final result."}
-						</p>
-					)}
-					<p className="mt-3 text-sm text-muted-foreground">
-						Started {formatDateTime(data.started_at)}
-						{data.finished_at
-							? ` · Finished ${formatDateTime(data.finished_at)}`
-							: ""}
+			<Section
+				title="Final result"
+				description={`Started ${formatDateTime(data.started_at)}${
+					data.finished_at
+						? ` · Finished ${formatDateTime(data.finished_at)}`
+						: ""
+				}`}
+			>
+				{output ? (
+					<OutputBlock label="Final result" value={output} />
+				) : (
+					<p className="flex items-center gap-2 rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground">
+						{live ? (
+							<Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+						) : null}
+						{live ? "Waiting for the last step to finish…" : "No final result."}
 					</p>
-				</CardContent>
-			</Card>
+				)}
+			</Section>
 
 			<Collapsible
 				open={processOpen}
@@ -126,7 +129,15 @@ export function ChainRunView({
 				className="mt-6"
 			>
 				<CollapsibleTrigger asChild>
-					<Button type="button" variant="outline">
+					<Button type="button" variant="outline" size="sm">
+						<ChevronRightIcon
+							aria-hidden="true"
+							className={
+								processOpen
+									? "rotate-90 transition-transform"
+									: "transition-transform"
+							}
+						/>
 						{processOpen ? "Hide process" : "Show process"}
 					</Button>
 				</CollapsibleTrigger>
@@ -155,7 +166,7 @@ function ChainStepTimeline({ steps }: { steps: ChainRunStep[] }) {
 	const ordered = [...steps].sort((a, b) => a.position - b.position);
 
 	return (
-		<ol className="space-y-4 border-l border-(--line) pl-4">
+		<ol className="space-y-4 border-l pl-4">
 			{ordered.map((step) => (
 				<li key={`${step.position}-${step.agent_id}`} className="space-y-2">
 					<div className="flex flex-wrap items-center gap-2">
@@ -181,9 +192,10 @@ function ChainStepTimeline({ steps }: { steps: ChainRunStep[] }) {
 						) : null}
 					</div>
 					{step.result?.output ? (
-						<pre className="whitespace-pre-wrap rounded-md bg-(--sand) p-2 text-xs">
-							{step.result.output}
-						</pre>
+						<OutputBlock
+							label={`Step ${step.position + 1} output`}
+							value={step.result.output}
+						/>
 					) : null}
 					{step.error_message ? (
 						<p className="text-sm text-destructive">{step.error_message}</p>
