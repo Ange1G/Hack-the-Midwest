@@ -5,6 +5,7 @@ import sys
 import httpx
 
 from agent_run import failure_body, parse_manifest, run_turn
+from db_tools import execute_database_tool, summarize_db_call
 from http_tools import execute_http_tool, parse_json_env, summarize_call
 
 
@@ -14,7 +15,7 @@ def invoke_strands(system_prompt: str, user_message: str) -> object:
 
     model_id = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
     model = OpenAIModel(model_id=model_id)
-    tools = _strands_http_tools()
+    tools = _strands_http_tools() + _strands_database_tools()
     kwargs: dict = {"model": model, "callback_handler": None}
     if tools:
         kwargs["tools"] = tools
@@ -45,6 +46,39 @@ def _strands_http_tools() -> list:
                 return text
 
             return http_connector_call
+
+        built.append(_make())
+    return built
+
+
+def _strands_database_tools() -> list:
+    from strands import tool
+
+    specs = parse_json_env(os.environ.get("DATABASE_TOOLS_JSON"), [])
+    credentials = parse_json_env(os.environ.get("DATABASE_CREDENTIALS_JSON"), {})
+    if not isinstance(specs, list):
+        return []
+    built = []
+    for spec in specs:
+        if not isinstance(spec, dict) or not spec.get("name"):
+            continue
+
+        def _make(s: dict = spec) -> object:
+            @tool(name=s["name"])
+            def database_connector_call(
+                statement: str, params: list | None = None
+            ) -> str:
+                creds = credentials.get(s.get("id"), {}) if isinstance(credentials, dict) else {}
+                text = execute_database_tool(
+                    s,
+                    creds if isinstance(creds, dict) else {},
+                    statement,
+                    params=params,
+                )
+                TOOL_CALLS.append(summarize_db_call(s, text))
+                return text
+
+            return database_connector_call
 
         built.append(_make())
     return built

@@ -288,10 +288,20 @@ database is reached.
 
 Agents reference database connectors like HTTP ones: `"primitives": { "<id>": {} }`.
 
+When the worker claims a run it calls `agent_databases()` before `docker run`. Provisioned
+databases start (or reuse) for that run; `lifecycle: "run"` databases are removed afterwards,
+including when the container fails. Connection details are passed as `DATABASE_TOOLS_JSON`
+(no passwords) and `DATABASE_CREDENTIALS_JSON` (passwords and optional CA). Loopback hosts
+are rewritten to `host.docker.internal` so the runner container can reach databases published
+on the Docker host. Set `DATABASE_PROVISIONER_NETWORK` when the runner and databases share a
+Docker network instead of published ports.
+
+Read-only connectors are enforced in the runner (`SELECT` / read commands only), not by the
+model.
+
 ### Try provisioning without a run
 
-Agent runs (worker) call `app.runtime.agent_databases.agent_databases()` when they start.
-Until the worker exists, this command does the same for one agent (Docker must be running):
+The same hook the worker uses can be exercised from the CLI (Docker must be running):
 
 ```bash
 uv run python -m app.runtime.databases_cli up <agent id>                    # Ctrl+C ends the "run"

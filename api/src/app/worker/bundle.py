@@ -11,8 +11,12 @@ from app.core.secrets import SecretCipher
 from app.domains.agents.models import Agent
 from app.domains.connectors.models import Connector
 from app.domains.connectors.repository import ConnectorWithSecrets
+from app.runtime.agent_databases import DatabaseConnection
 
 DEFAULT_TIMEOUT_MS = 10_000
+DEFAULT_ROW_LIMIT = 100
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+CONTAINER_DB_HOST = "host.docker.internal"
 
 
 class BundleBuildError(Exception):
@@ -24,6 +28,12 @@ class BundleBuildError(Exception):
 
 @dataclass(frozen=True)
 class HttpToolBundle:
+    tools: list[dict[str, Any]]
+    credentials: dict[str, dict[str, str]]
+
+
+@dataclass(frozen=True)
+class DatabaseToolBundle:
     tools: list[dict[str, Any]]
     credentials: dict[str, dict[str, str]]
 
@@ -113,3 +123,38 @@ def _http_tool_spec(connector: Connector) -> dict[str, Any]:
     if config.get("payload") is not None:
         spec["payload"] = config["payload"]
     return spec
+
+
+def build_database_tool_bundle(
+    connections: dict[str, DatabaseConnection],
+    *,
+    container_host: str = CONTAINER_DB_HOST,
+) -> DatabaseToolBundle:
+    """Runner-facing specs. Passwords and CA material stay in the credentials map."""
+    tools: list[dict[str, Any]] = []
+    credentials: dict[str, dict[str, str]] = {}
+    for connection in connections.values():
+        host = (
+            container_host if connection.host in LOOPBACK_HOSTS else connection.host
+        )
+        spec: dict[str, Any] = {
+            "id": str(connection.connector_id),
+            "name": connection.name,
+            "engine": str(connection.engine),
+            "host": host,
+            "port": connection.port,
+            "database": connection.database,
+            "username": connection.username,
+            "tls": connection.tls,
+            "read_only": connection.read_only,
+            "timeout_ms": connection.timeout_ms or DEFAULT_TIMEOUT_MS,
+            "retries": connection.retries or 0,
+            "row_limit": DEFAULT_ROW_LIMIT,
+            "addresses": list(connection.addresses),
+        }
+        tools.append(spec)
+        creds: dict[str, str] = {"password": connection.password}
+        if connection.ca_certificate:
+            creds["caCertificate"] = connection.ca_certificate
+        credentials[str(connection.connector_id)] = creds
+    return DatabaseToolBundle(tools=tools, credentials=credentials)

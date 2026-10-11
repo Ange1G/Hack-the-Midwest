@@ -14,9 +14,12 @@ from app.domains.executions.models import ExecutionStatus
 from app.domains.executions.repository import SqlAlchemyExecutionRepository, is_terminal
 from app.domains.executions.service import agent_manifest
 from app.domains.executions.tokens import generate_callback_token, hash_callback_token
+from app.runtime.agent_databases import AgentDatabaseError, Resolver, agent_databases
+from app.runtime.database_provisioner import DatabaseProvisioner, DockerDatabaseProvisioner
 from app.worker.bundle import (
     BundleBuildError,
     HttpToolBundle,
+    build_database_tool_bundle,
     build_http_tool_bundle,
     cipher_from_settings,
     referenced_connector_ids,
@@ -52,6 +55,9 @@ async def process_once(
     session_factory: async_sessionmaker[AsyncSession],
     runner: ContainerRunner,
     settings: Settings,
+    *,
+    provisioner: DatabaseProvisioner | None = None,
+    resolve: Resolver | None = None,
 ) -> bool:
     claimed = await _claim(session_factory, settings)
     if claimed is None:
@@ -67,32 +73,84 @@ async def process_once(
         )
         return True
 
-    request = RunRequest(
-        execution_id=claimed.execution_id,
-        agent_id=claimed.agent_id,
-        owner_user_sso=claimed.owner_user_sso,
-        callback_url=_callback_url(settings, claimed.execution_id),
-        callback_token=claimed.callback_token,
-        agent_manifest=claimed.manifest,
-        timeout_seconds=settings.execution_timeout_seconds,
-        image=settings.execution_runner_image,
-        openai_api_key=openai_key,
-        openai_model=settings.openai_model,
-        http_tools=claimed.http_tools,
-        http_credentials=claimed.http_credentials or None,
-        ssl_ca_bundle=settings.execution_ssl_ca_bundle or None,
-    )
+    db_provisioner = provisioner or DockerDatabaseProvisioner.from_settings(settings)
     try:
-        outcome = await runner.run(request)
-    except Exception:
-        logger.exception("container runner failed execution_id=%s", claimed.execution_id)
-        outcome = RunOutcome(
-            exit_code=1,
-            timed_out=False,
-            runner_meta={"error": "runner_error"},
+        outcome = await _run_with_databases(
+            session_factory,
+            runner,
+            settings,
+            claimed,
+            openai_key,
+            db_provisioner,
+            resolve,
         )
+    except AgentDatabaseError as exc:
+        await _fail_running(
+            session_factory,
+            claimed.execution_id,
+            error_code="database_unavailable",
+            error_message=str(exc),
+        )
+        return True
     await _reconcile(session_factory, claimed.execution_id, outcome)
     return True
+
+
+async def _run_with_databases(
+    session_factory: async_sessionmaker[AsyncSession],
+    runner: ContainerRunner,
+    settings: Settings,
+    claimed: ClaimedJob,
+    openai_key: str,
+    provisioner: DatabaseProvisioner,
+    resolve: Resolver | None,
+) -> RunOutcome:
+    cipher = cipher_from_settings(settings)
+    async with session_factory() as session:
+        agents = SqlAlchemyAgentRepository(session)
+        connectors = SqlAlchemyConnectorRepository(session)
+        agent = await agents.get_owned(claimed.owner_user_sso, claimed.agent_id)
+        if agent is None:
+            raise AgentDatabaseError("Agent was not found when databases were prepared")
+        db_kwargs: dict[str, Any] = {}
+        if resolve is not None:
+            db_kwargs["resolve"] = resolve
+        async with agent_databases(
+            agent,
+            connectors=connectors,
+            cipher=cipher,
+            provisioner=provisioner,
+            **db_kwargs,
+        ) as connections:
+            db_bundle = build_database_tool_bundle(connections)
+            request = RunRequest(
+                execution_id=claimed.execution_id,
+                agent_id=claimed.agent_id,
+                owner_user_sso=claimed.owner_user_sso,
+                callback_url=_callback_url(settings, claimed.execution_id),
+                callback_token=claimed.callback_token,
+                agent_manifest=claimed.manifest,
+                timeout_seconds=settings.execution_timeout_seconds,
+                image=settings.execution_runner_image,
+                openai_api_key=openai_key,
+                openai_model=settings.openai_model,
+                http_tools=claimed.http_tools,
+                http_credentials=claimed.http_credentials or None,
+                database_tools=db_bundle.tools,
+                database_credentials=db_bundle.credentials or None,
+                ssl_ca_bundle=settings.execution_ssl_ca_bundle or None,
+            )
+            try:
+                return await runner.run(request)
+            except Exception:
+                logger.exception(
+                    "container runner failed execution_id=%s", claimed.execution_id
+                )
+                return RunOutcome(
+                    exit_code=1,
+                    timed_out=False,
+                    runner_meta={"error": "runner_error"},
+                )
 
 
 async def run_forever(

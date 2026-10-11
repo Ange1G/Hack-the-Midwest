@@ -28,6 +28,18 @@ def test_docker_command_isolates_container_and_passes_callback_env() -> None:
                 }
             ],
             http_credentials={"11111111-1111-1111-1111-111111111111": {"xApiKey": "key-live"}},
+            database_tools=[
+                {
+                    "id": "22222222-2222-2222-2222-222222222222",
+                    "name": "orders_db",
+                    "engine": "postgres",
+                    "host": "host.docker.internal",
+                    "port": 49001,
+                }
+            ],
+            database_credentials={
+                "22222222-2222-2222-2222-222222222222": {"password": "db-secret"}
+            },
         )
     )
     joined = " ".join(cmd)
@@ -45,12 +57,18 @@ def test_docker_command_isolates_container_and_passes_callback_env() -> None:
     manifest_flag = next(item for item in cmd if item.startswith("AGENT_MANIFEST="))
     tools_flag = next(item for item in cmd if item.startswith("HTTP_TOOLS_JSON="))
     creds_flag = next(item for item in cmd if item.startswith("HTTP_CREDENTIALS_JSON="))
+    db_tools_flag = next(item for item in cmd if item.startswith("DATABASE_TOOLS_JSON="))
+    db_creds_flag = next(item for item in cmd if item.startswith("DATABASE_CREDENTIALS_JSON="))
     assert "sk-secret" not in manifest_flag
     assert "key-live" not in manifest_flag
     assert "key-live" not in tools_flag
     assert "Be terse." in manifest_flag
     assert "https://api.example.com/issues" in tools_flag
     assert "key-live" in creds_flag
+    assert "orders_db" in db_tools_flag
+    assert "db-secret" not in db_tools_flag
+    assert "db-secret" not in manifest_flag
+    assert "db-secret" in db_creds_flag
 
 
 def test_docker_command_omits_openai_key_when_missing() -> None:
