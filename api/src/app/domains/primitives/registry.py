@@ -16,7 +16,9 @@ from app.domains.primitives.base import (
 )
 from app.domains.primitives.database_contract import DATABASE_MODES, DatabaseContract
 from app.domains.primitives.http_contract import HttpContract
+from app.domains.primitives.knowledge_contract import KnowledgeContract
 from app.domains.primitives.mcp_contract import McpContract
+from app.domains.primitives.notification_contract import NotificationContract
 
 
 @dataclass(frozen=True)
@@ -35,7 +37,10 @@ CONNECTORS: dict[str, ConnectorType] = {
         ConnectorType(
             type="http",
             name="HTTP request",
-            description="Call an HTTP API endpoint with a fixed method and URL.",
+            description=(
+                "Call an HTTP API endpoint with a fixed method and URL. "
+                "Optional query and body allowlists let the agent fill in values."
+            ),
             contract=HttpContract,
         ),
         ConnectorType(
@@ -53,6 +58,24 @@ CONNECTORS: dict[str, ConnectorType] = {
             ),
             contract=DatabaseContract,
             nested_tags=DATABASE_MODES,
+        ),
+        ConnectorType(
+            type="notification",
+            name="Notification",
+            description=(
+                "Send a JSON message to a destination you choose, such as a Slack "
+                "incoming webhook or a pager. The agent fills only the listed fields."
+            ),
+            contract=NotificationContract,
+        ),
+        ConnectorType(
+            type="knowledge",
+            name="Knowledge",
+            description=(
+                "Text documents you paste in (runbooks, policies, notes). The agent can "
+                "keyword-search them and read the matching passages."
+            ),
+            contract=KnowledgeContract,
         ),
     )
 }

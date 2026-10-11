@@ -1,7 +1,7 @@
 [project]
 name = "api"
 version = "0.1.0"
-description = "Agent platform HTTP API"
+description = "Stragents HTTP API"
 readme = "README.md"
 authors = [
     { name = "Jesus Garcia", email = "devwithjesus.business@gmail.com" }
@@ -12,6 +12,7 @@ dependencies = [
     "asyncpg>=0.30.0",
     "cryptography>=44.0.0",
     "fastapi[standard]>=0.143.0",
+    "jsonschema>=4.23,<5",
     "pydantic-settings>=2.7.0",
     "sqlalchemy[asyncio]>=2.0.36",
 ]

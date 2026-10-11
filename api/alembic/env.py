@@ -14,6 +14,8 @@ from app.domains.executions.models import AgentExecution  # noqa: F401
 from app.scheduler.models import ScheduledChainFire, ScheduledExecutionFire  # noqa: F401
 from app.domains.webhooks.models import Webhook  # noqa: F401
 from app.domains.chains.models import AgentChain, AgentChainStep  # noqa: F401
+from app.domains.knowledge.models import KnowledgeDocument  # noqa: F401
+from app.domains.memory.models import AgentMemory  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:
