@@ -73,10 +73,10 @@ The production message broker, container scheduling strategy, and authentication
 ├── README.md                  # This file
 ├── api/                       # FastAPI backend
 │   ├── src/app/
-│   │   ├── domains/           # agents/, connectors/, executions/, primitives/
+│   │   ├── domains/           # agents/, connectors/, executions/, primitives/, webhooks/
 │   │   ├── worker/            # loop.py, docker_runner.py, bundle.py, runner.py
 │   │   └── core/              # config, database, secrets, auth, exceptions
-│   ├── alembic/versions/      # Migrations 001–004
+│   ├── alembic/versions/      # Migrations 001–007
 │   ├── tests/unit/
 │   ├── tests/integration/
 │   ├── .env.example
@@ -117,6 +117,10 @@ All user-facing routes are under `/api/v1`. Dev/test auth: `X-Dev-User-SSO: <sso
 | Get execution | `GET /api/v1/agents/{user_sso}/executions/{execution_id}` | 200 | Poll until terminal status |
 | List executions | `GET /api/v1/agents/{user_sso}/executions` | 200 | Paginated |
 | Internal callback | `POST /api/v1/internal/executions/{execution_id}/complete` | 200 | Container → API; token-authenticated |
+| Create webhook | `POST /api/v1/webhooks/{user_sso}` | 201 | HMAC secret returned once |
+| List webhooks | `GET /api/v1/webhooks/{user_sso}` | 200 | Secret masked |
+| Delete webhook | `DELETE /api/v1/webhooks/{user_sso}/{webhook_id}` | 204 | |
+| Fire webhook | `POST /api/v1/hooks/{webhook_id}` | 202 | HMAC only; no SSO |
 
 Execution status lifecycle: `queued` → `running` → `succeeded` | `failed` | `timed_out`.
 

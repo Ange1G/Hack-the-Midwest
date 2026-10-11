@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     # IANA timezone used to interpret agent dayOfWeek / timeOfDay. MVP: one zone
     # for the whole platform (default UTC).
     scheduler_timezone: str = "UTC"
+    webhook_max_body_bytes: int = 20_000
+    webhook_rate_limit_per_minute: int = 30
 
     @field_validator("cors_origins", mode="before")
     @classmethod

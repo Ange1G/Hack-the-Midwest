@@ -16,6 +16,10 @@ from app.domains.connectors.service import ConnectorService
 from app.domains.executions.controller import ExecutionsController
 from app.domains.executions.repository import SqlAlchemyExecutionRepository
 from app.domains.executions.service import ExecutionService
+from app.domains.webhooks.controller import WebhooksController
+from app.domains.webhooks.rate_limit import webhook_rate_limiter
+from app.domains.webhooks.repository import SqlAlchemyWebhookRepository
+from app.domains.webhooks.service import WebhookService
 
 
 async def get_current_user(
@@ -84,3 +88,21 @@ async def get_executions_controller(
         SqlAlchemyAgentRepository(session),
     )
     return ExecutionsController(service=service, settings=settings)
+
+
+async def get_webhooks_controller(
+    session: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> WebhooksController:
+    agents = SqlAlchemyAgentRepository(session)
+    executions = ExecutionService(
+        SqlAlchemyExecutionRepository(session),
+        agents,
+    )
+    service = WebhookService(
+        SqlAlchemyWebhookRepository(session),
+        agents,
+        executions,
+        rate_limiter=webhook_rate_limiter,
+    )
+    return WebhooksController(service=service, settings=settings)

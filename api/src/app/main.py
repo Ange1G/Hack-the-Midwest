@@ -56,6 +56,7 @@ def create_app() -> FastAPI:
                 "Content-Type",
                 "X-Dev-User-SSO",
                 "X-Request-ID",
+                "X-Webhook-Signature",
             ],
             expose_headers=["X-Request-ID"],
         )

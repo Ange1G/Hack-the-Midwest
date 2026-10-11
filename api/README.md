@@ -193,6 +193,34 @@ and `timeOfDay` in `SCHEDULER_TIMEZONE` (default UTC; `0` = Sunday) and enqueues
 at most once per agent per slot (`YYYY-MM-DD:mmmm`). Empty `timeOfDay` means the agent
 is not scheduled. Poll interval is `SCHEDULER_POLL_INTERVAL_SECONDS` (default 15).
 
+## Webhook triggers
+
+Create a signed inbound URL that enqueues a run. Auth on create/list/delete is the
+usual `X-Dev-User-SSO`. The fire route uses HMAC only — no SSO, no user id in the path.
+
+```bash
+# Returns the plaintext secret once. List/get mask it as "********".
+curl -s -X POST -H "X-Dev-User-SSO: sso-user-a" -H "Content-Type: application/json" \
+  "http://localhost:8000/api/v1/webhooks/sso-user-a" \
+  -d '{"target_agent_id":"<agent-id>"}'
+
+# Integrator call. Sign the raw body with HMAC-SHA256.
+# Header: X-Webhook-Signature: sha256=<hex>  (bare hex is also accepted)
+BODY='{"ticket":"INC-1"}'
+SIG=$(python -c "import hmac,hashlib,sys; print(hmac.new(sys.argv[1].encode(), sys.argv[2].encode(), hashlib.sha256).hexdigest())" "$SECRET" "$BODY")
+curl -s -X POST "http://localhost:8000/api/v1/hooks/<webhook-id>" \
+  -H "Content-Type: application/json" \
+  -H "X-Webhook-Signature: sha256=$SIG" \
+  -d "$BODY"
+```
+
+A valid fire returns `202` and a queued `execution_id`. The body is stored as per-run
+`input`: compact JSON when the body is JSON, otherwise the UTF-8 text. Invalid
+signature is `401` and creates no execution. A deleted target agent (or deleted
+webhook) is `404`. Max body is `WEBHOOK_MAX_BODY_BYTES` (default 20,000). Each
+webhook is limited to `WEBHOOK_RATE_LIMIT_PER_MINUTE` fires (default 30; in-memory
+per API process). Creating a webhook requires `SECRETS_ENCRYPTION_KEY`.
+
 The container must reach the API at `EXECUTION_CALLBACK_BASE_URL`
 (default `http://host.docker.internal:8000`). The worker always passes
 `--add-host=host.docker.internal:host-gateway` for Linux Docker.
