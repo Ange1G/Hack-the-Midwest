@@ -188,8 +188,10 @@ The container must reach the API at `EXECUTION_CALLBACK_BASE_URL`
 
 The runner uses AWS Strands Agents with OpenAI (`system_prompt` from the agent record).
 HTTP connectors become Strands tools that call the **stored** method/URL only (the model
-cannot pick a URL). MCP connectors are ignored at run time for now.
-See `spec/2026-10-10-strands-openai-runner/` and `spec/2026-10-10-agent-execution-http-tools/`.
+cannot pick a URL). MCP connectors are listed at claim time (fail closed if an
+`allowedTools` name is missing on the server) and become Strands tools over streamable HTTP.
+See `spec/2026-10-10-strands-openai-runner/`, `spec/2026-10-10-agent-execution-http-tools/`,
+and `spec/2026-10-21-agent-execution-mcp/`.
 
 Owners may have at most `MAX_ACTIVE_EXECUTIONS_PER_OWNER` queued or running jobs (default 5).
 

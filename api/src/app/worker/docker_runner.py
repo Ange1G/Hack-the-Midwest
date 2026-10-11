@@ -25,6 +25,10 @@ def docker_run_command(request: RunRequest) -> list[str]:
         env.append(f"HTTP_TOOLS_JSON={json.dumps(request.http_tools)}")
     if request.http_credentials:
         env.append(f"HTTP_CREDENTIALS_JSON={json.dumps(request.http_credentials)}")
+    if request.mcp_servers is not None:
+        env.append(f"MCP_SERVERS_JSON={json.dumps(request.mcp_servers)}")
+    if request.mcp_credentials:
+        env.append(f"MCP_CREDENTIALS_JSON={json.dumps(request.mcp_credentials)}")
     if request.database_tools is not None:
         env.append(f"DATABASE_TOOLS_JSON={json.dumps(request.database_tools)}")
     if request.database_credentials:

@@ -40,6 +40,19 @@ def test_docker_command_isolates_container_and_passes_callback_env() -> None:
             database_credentials={
                 "22222222-2222-2222-2222-222222222222": {"password": "db-secret"}
             },
+            mcp_servers=[
+                {
+                    "id": "33333333-3333-3333-3333-333333333333",
+                    "name": "linear",
+                    "URL": "https://mcp.example.com/mcp",
+                    "tools": ["list_issues"],
+                }
+            ],
+            mcp_credentials={
+                "33333333-3333-3333-3333-333333333333": {
+                    "authorizationHeader": "Bearer mcp-secret"
+                }
+            },
         )
     )
     joined = " ".join(cmd)
@@ -69,6 +82,12 @@ def test_docker_command_isolates_container_and_passes_callback_env() -> None:
     assert "db-secret" not in db_tools_flag
     assert "db-secret" not in manifest_flag
     assert "db-secret" in db_creds_flag
+    mcp_flag = next(item for item in cmd if item.startswith("MCP_SERVERS_JSON="))
+    mcp_creds_flag = next(item for item in cmd if item.startswith("MCP_CREDENTIALS_JSON="))
+    assert "list_issues" in mcp_flag
+    assert "mcp-secret" not in mcp_flag
+    assert "mcp-secret" not in manifest_flag
+    assert "mcp-secret" in mcp_creds_flag
 
 
 def test_docker_command_omits_openai_key_when_missing() -> None:

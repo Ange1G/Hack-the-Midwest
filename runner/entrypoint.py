@@ -7,6 +7,7 @@ import httpx
 from agent_run import failure_body, parse_manifest, run_turn
 from db_tools import execute_database_tool, summarize_db_call
 from http_tools import execute_http_tool, parse_json_env, summarize_call
+from mcp_tools import call_mcp_tool, summarize_mcp_call
 
 
 def invoke_strands(system_prompt: str, user_message: str) -> object:
@@ -15,7 +16,7 @@ def invoke_strands(system_prompt: str, user_message: str) -> object:
 
     model_id = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
     model = OpenAIModel(model_id=model_id)
-    tools = _strands_http_tools() + _strands_database_tools()
+    tools = _strands_http_tools() + _strands_database_tools() + _strands_mcp_tools()
     kwargs: dict = {"model": model, "callback_handler": None}
     if tools:
         kwargs["tools"] = tools
@@ -81,6 +82,43 @@ def _strands_database_tools() -> list:
             return database_connector_call
 
         built.append(_make())
+    return built
+
+
+def _strands_mcp_tools() -> list:
+    from strands import tool
+
+    servers = parse_json_env(os.environ.get("MCP_SERVERS_JSON"), [])
+    credentials = parse_json_env(os.environ.get("MCP_CREDENTIALS_JSON"), {})
+    if not isinstance(servers, list):
+        return []
+    built = []
+    for server in servers:
+        if not isinstance(server, dict):
+            continue
+        for tool_name in server.get("tools") or []:
+            if not isinstance(tool_name, str) or not tool_name:
+                continue
+            strands_name = f"{server.get('name') or 'mcp'}__{tool_name}"
+
+            def _make(s: dict = server, name: str = tool_name, registered: str = strands_name) -> object:
+                @tool(name=registered)
+                def mcp_connector_call(arguments: dict | None = None) -> str:
+                    creds = (
+                        credentials.get(s.get("id"), {}) if isinstance(credentials, dict) else {}
+                    )
+                    text = call_mcp_tool(
+                        s,
+                        creds if isinstance(creds, dict) else {},
+                        name,
+                        arguments,
+                    )
+                    TOOL_CALLS.append(summarize_mcp_call(s, name, text))
+                    return text
+
+                return mcp_connector_call
+
+            built.append(_make())
     return built
 
 

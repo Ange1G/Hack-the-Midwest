@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -36,6 +37,15 @@ class HttpToolBundle:
 class DatabaseToolBundle:
     tools: list[dict[str, Any]]
     credentials: dict[str, dict[str, str]]
+
+
+@dataclass(frozen=True)
+class McpToolBundle:
+    servers: list[dict[str, Any]]
+    credentials: dict[str, dict[str, str]]
+
+
+McpListTools = Callable[[str, dict[str, str], float], Awaitable[list[str]]]
 
 
 def cipher_from_settings(settings: Settings) -> SecretCipher | None:
@@ -93,6 +103,78 @@ def build_http_tool_bundle(
         if decrypted:
             credentials[str(connector.id)] = decrypted
     return HttpToolBundle(tools=tools, credentials=credentials)
+
+
+async def build_mcp_tool_bundle(
+    agent: Agent,
+    owned: list[ConnectorWithSecrets],
+    cipher: SecretCipher | None,
+    *,
+    list_tools: McpListTools,
+) -> McpToolBundle:
+    requested = referenced_connector_ids(agent)
+    by_id = {item.connector.id: item for item in owned}
+    if any(connector_id not in by_id for connector_id in requested):
+        raise BundleBuildError("connector_missing", "Connector not found")
+
+    servers: list[dict[str, Any]] = []
+    credentials: dict[str, dict[str, str]] = {}
+    for connector_id in requested:
+        loaded = by_id[connector_id]
+        connector = loaded.connector
+        if connector.type != "mcp":
+            continue
+        decrypted = (
+            _decrypt_ciphertexts(loaded.ciphertexts, cipher) if loaded.ciphertexts else {}
+        )
+        allowed = _allowed_mcp_tools(agent, connector_id)
+        contract = connector.contract or {}
+        config = contract.get("config") or {}
+        options = contract.get("options") or {}
+        url = config.get("URL")
+        if not isinstance(url, str) or not url:
+            raise BundleBuildError("mcp_unavailable", "MCP connector is missing a URL")
+        timeout_ms = options.get("timeout") or DEFAULT_TIMEOUT_MS
+        from app.worker.mcp_client import mcp_request_headers
+
+        advertised = await list_tools(
+            url, mcp_request_headers(decrypted), max(int(timeout_ms), 100) / 1000
+        )
+        missing = [name for name in allowed if name not in set(advertised)]
+        if missing:
+            raise BundleBuildError(
+                "mcp_tool_missing",
+                "MCP server does not advertise allowed tool(s): " + ", ".join(missing),
+            )
+        servers.append(
+            {
+                "id": str(connector.id),
+                "name": connector.name,
+                "URL": url,
+                "transport": config.get("transport") or "streamableHttp",
+                "tools": sorted(allowed),
+                "timeout_ms": timeout_ms,
+            }
+        )
+        if decrypted:
+            credentials[str(connector.id)] = decrypted
+    return McpToolBundle(servers=servers, credentials=credentials)
+
+
+def _allowed_mcp_tools(agent: Agent, connector_id: uuid.UUID) -> list[str]:
+    primitives = (agent.configurations or {}).get("primitives") or {}
+    reference = primitives.get(str(connector_id)) or primitives.get(connector_id) or {}
+    if not isinstance(reference, dict):
+        names: list[Any] = []
+    else:
+        names = reference.get("allowedTools") or reference.get("allowed_tools") or []
+    allowed = [str(name) for name in names if str(name).strip()]
+    if not allowed:
+        raise BundleBuildError(
+            "mcp_tool_missing",
+            "MCP connectors need allowedTools listing the tools this agent may call",
+        )
+    return allowed
 
 
 def _decrypt_ciphertexts(

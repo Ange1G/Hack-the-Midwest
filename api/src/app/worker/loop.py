@@ -19,11 +19,15 @@ from app.runtime.database_provisioner import DatabaseProvisioner, DockerDatabase
 from app.worker.bundle import (
     BundleBuildError,
     HttpToolBundle,
+    McpListTools,
+    McpToolBundle,
     build_database_tool_bundle,
     build_http_tool_bundle,
+    build_mcp_tool_bundle,
     cipher_from_settings,
     referenced_connector_ids,
 )
+from app.worker.mcp_client import list_mcp_tools
 from app.worker.runner import ContainerRunner, RunOutcome, RunRequest
 
 
@@ -49,6 +53,8 @@ class ClaimedJob:
     manifest: dict[str, Any]
     http_tools: list[dict[str, Any]] = field(default_factory=list)
     http_credentials: dict[str, dict[str, str]] = field(default_factory=dict)
+    mcp_servers: list[dict[str, Any]] = field(default_factory=list)
+    mcp_credentials: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 async def process_once(
@@ -58,8 +64,11 @@ async def process_once(
     *,
     provisioner: DatabaseProvisioner | None = None,
     resolve: Resolver | None = None,
+    list_mcp_tools: McpListTools | None = None,
 ) -> bool:
-    claimed = await _claim(session_factory, settings)
+    claimed = await _claim(
+        session_factory, settings, list_mcp_tools=list_mcp_tools
+    )
     if claimed is None:
         return False
 
@@ -136,6 +145,8 @@ async def _run_with_databases(
                 openai_model=settings.openai_model,
                 http_tools=claimed.http_tools,
                 http_credentials=claimed.http_credentials or None,
+                mcp_servers=claimed.mcp_servers,
+                mcp_credentials=claimed.mcp_credentials or None,
                 database_tools=db_bundle.tools,
                 database_credentials=db_bundle.credentials or None,
                 ssl_ca_bundle=settings.execution_ssl_ca_bundle or None,
@@ -165,7 +176,10 @@ async def run_forever(
 
 
 async def _claim(
-    session_factory: async_sessionmaker[AsyncSession], settings: Settings
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    *,
+    list_mcp_tools: McpListTools | None = None,
 ) -> ClaimedJob | None:
     token = generate_callback_token()
     async with session_factory() as session:
@@ -185,7 +199,12 @@ async def _claim(
             )
             return None
         try:
-            bundle = await _http_bundle(agent, connectors, settings)
+            http_bundle, mcp_bundle = await _connector_bundles(
+                agent,
+                connectors,
+                settings,
+                list_mcp_tools=list_mcp_tools,
+            )
         except BundleBuildError as exc:
             await executions.fail_if_running(
                 execution.id,
@@ -200,19 +219,35 @@ async def _claim(
             owner_user_sso=execution.owner_user_sso,
             callback_token=token,
             manifest=agent_manifest(agent),
-            http_tools=bundle.tools,
-            http_credentials=bundle.credentials,
+            http_tools=http_bundle.tools,
+            http_credentials=http_bundle.credentials,
+            mcp_servers=mcp_bundle.servers,
+            mcp_credentials=mcp_bundle.credentials,
         )
 
 
-async def _http_bundle(
+async def _connector_bundles(
     agent: Agent,
     connectors: SqlAlchemyConnectorRepository,
     settings: Settings,
-) -> HttpToolBundle:
+    *,
+    list_mcp_tools: McpListTools | None = None,
+) -> tuple[HttpToolBundle, McpToolBundle]:
     ids = referenced_connector_ids(agent)
     owned = await connectors.get_with_secrets(agent.owner_user_sso, ids)
-    return build_http_tool_bundle(agent, owned, cipher_from_settings(settings))
+    cipher = cipher_from_settings(settings)
+    http_bundle = build_http_tool_bundle(agent, owned, cipher)
+    mcp_bundle = await build_mcp_tool_bundle(
+        agent,
+        owned,
+        cipher,
+        list_tools=list_mcp_tools or list_mcp_tools_default,
+    )
+    return http_bundle, mcp_bundle
+
+
+# Alias so tests can inject a fake while production uses the HTTP client.
+list_mcp_tools_default = list_mcp_tools
 
 
 async def _reconcile(

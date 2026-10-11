@@ -12,7 +12,7 @@ RUN apt-get update \
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY agent_run.py http_tools.py db_tools.py entrypoint.py /app/
+COPY agent_run.py http_tools.py db_tools.py mcp_tools.py entrypoint.py /app/
 
 USER nobody
 ENTRYPOINT ["python", "-u", "/app/entrypoint.py"]

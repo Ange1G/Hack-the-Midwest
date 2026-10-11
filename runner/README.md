@@ -21,6 +21,8 @@ docker build -t agent-platform-runner:local .
 | `HTTP_CREDENTIALS_JSON` | Map of connector id → header credentials. Never in the manifest. |
 | `DATABASE_TOOLS_JSON` | Database connector specs (engine, host, port, read_only). No passwords. |
 | `DATABASE_CREDENTIALS_JSON` | Map of connector id → `{ password, caCertificate? }`. Never in the manifest. |
+| `MCP_SERVERS_JSON` | MCP servers and allowlisted tool names. No credentials. |
+| `MCP_CREDENTIALS_JSON` | Map of connector id → header credentials. Never in the manifest. |
 
 The container must reach the API at `EXECUTION_CALLBACK_BASE_URL`
 (default `http://host.docker.internal:8000`). The worker passes
