@@ -1,6 +1,8 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router";
 import { ApiUnavailable } from "#/components/api-unavailable";
 import { AppShell } from "#/components/layout/app-shell";
+import { RunNotifications } from "#/components/runs/run-notifications";
+import { Toaster } from "#/components/toaster";
 import { getCurrentUser } from "#/lib/api/identity";
 import { ensureMocksReady } from "#/lib/mocks-ready";
 
@@ -21,8 +23,12 @@ export const Route = createFileRoute("/_app")({
 function AppLayout() {
 	const { user } = Route.useRouteContext();
 	return (
-		<AppShell user={user}>
-			<Outlet />
-		</AppShell>
+		<>
+			<AppShell user={user}>
+				<Outlet />
+			</AppShell>
+			<RunNotifications />
+			<Toaster />
+		</>
 	);
 }

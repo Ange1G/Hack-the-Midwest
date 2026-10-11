@@ -65,6 +65,20 @@ test("every screen in the demo flow has no serious accessibility violations", as
 	await page.getByRole("link", { name: "View run" }).first().click();
 	await expect(page.getByText("Succeeded", { exact: true })).toBeVisible();
 	await expectAccessible(page, "run page");
+
+	// A run started from the list announces itself with a notification.
+	await page.getByRole("link", { name: "Agents", exact: true }).click();
+	await page
+		.getByRole("row", { name: /DevRev ticket triage/ })
+		.getByRole("button", { name: "Start" })
+		.click();
+	await expect(
+		page
+			.getByRole("region", { name: /notifications/i })
+			.locator('[data-slot="toast"]')
+			.filter({ hasText: "DevRev ticket triage" }),
+	).toBeVisible({ timeout: 15_000 });
+	await expectAccessible(page, "agents list with a notification");
 });
 
 test("dark mode is remembered across reloads and keeps the screens accessible", async ({

@@ -50,4 +50,21 @@ test("open the dashboard, build an agent, run it, and see an unsafe agent refuse
 		page.getByText("Private, loopback and link-local addresses are not allowed"),
 	).toBeVisible();
 	await expect(page).toHaveURL(/\/agents\/new$/);
+
+	// Start a run from the list and keep working there: a notification pops up
+	// when it finishes and opens the run.
+	await page.getByRole("link", { name: "Agents", exact: true }).click();
+	const triage = page.getByRole("row", { name: /DevRev ticket triage/ });
+	await triage.getByRole("button", { name: "Start" }).click();
+	const notice = page
+		.getByRole("region", { name: /notifications/i })
+		.locator('[data-slot="toast"]')
+		.filter({ hasText: "DevRev ticket triage" });
+	await expect(notice).toBeVisible({ timeout: 15_000 });
+	await expect(notice).toContainText("Succeeded");
+	await notice.getByRole("button", { name: "View run" }).click();
+	await expect(page).toHaveURL(/\/runs\//);
+	await expect(
+		page.getByRole("heading", { name: "DevRev ticket triage" }),
+	).toBeVisible();
 });

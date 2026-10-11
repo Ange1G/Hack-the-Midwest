@@ -2,6 +2,8 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll } from "vitest";
 import { resetCurrentUser } from "#/lib/api/identity";
+import { clearWatchedRuns } from "#/lib/run-watch";
+import { clearToasts } from "#/lib/toast";
 import { server } from "#/mocks/server";
 import { resetMockState } from "#/mocks/state";
 
@@ -19,6 +21,15 @@ class ResizeObserverStub {
 }
 globalThis.ResizeObserver ??=
 	ResizeObserverStub as unknown as typeof ResizeObserver;
+
+// jsdom has no pointer capture; Radix Toast uses it for swipe-to-dismiss.
+Element.prototype.hasPointerCapture ??= () => false;
+Element.prototype.setPointerCapture ??= () => {
+	// No pointer capture in jsdom.
+};
+Element.prototype.releasePointerCapture ??= () => {
+	// No pointer capture in jsdom.
+};
 
 // shadcn sidebar uses matchMedia for mobile layout.
 Object.defineProperty(window, "matchMedia", {
@@ -44,6 +55,8 @@ afterEach(() => {
 	server.events.removeAllListeners();
 	resetMockState();
 	resetCurrentUser();
+	clearWatchedRuns();
+	clearToasts();
 	// The theme lives on <html> and in localStorage, outside React's tree.
 	document.documentElement.classList.remove("dark", "theme-switching");
 	window.localStorage.clear();

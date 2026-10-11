@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { getWatchedRuns } from "#/lib/run-watch";
 import { safeAgentInput } from "#/test/fixtures";
 import { actAs } from "#/test/identity";
 import { createQueryWrapper } from "#/test/query";
@@ -162,6 +163,8 @@ describe("run hooks", () => {
 
 		const run = await startRun(wrapper, agent.id);
 		expect(run.status).toBe("queued");
+		// Every run started here is watched so the app can announce its end.
+		expect(getWatchedRuns()).toContain(run.id);
 
 		const seen: RunStatus[] = [];
 		const poll = renderHook(

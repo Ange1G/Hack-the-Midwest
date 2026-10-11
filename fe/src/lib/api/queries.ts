@@ -4,6 +4,7 @@ import {
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
+import { watchRun } from "#/lib/run-watch";
 import { ApiError, api } from "./client";
 import { getCurrentUser } from "./identity";
 import {
@@ -212,6 +213,8 @@ export function useStartRun(agentId?: string) {
 			return api.post(`${agentsPath()}/${id}/executions`, executionSchema);
 		},
 		onSuccess: (run: Run) => {
+			// Announced when it settles (components/runs/run-notifications.tsx).
+			watchRun(run.id);
 			queryClient.setQueryData(queryKeys.run(run.id), run);
 			queryClient.setQueryData<Run[]>(queryKeys.executions, (current) => {
 				const items = current ?? [];
