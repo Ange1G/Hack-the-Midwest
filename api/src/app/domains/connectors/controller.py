@@ -1,3 +1,4 @@
+import uuid
 from typing import Any
 
 from app.common.envelope import ApiEnvelope, ApiMetadata, Pagination
@@ -6,8 +7,9 @@ from app.core.auth import CurrentUser
 from app.core.config import Settings
 from app.core.request_context import request_id_ctx
 from app.core.secrets import SecretCipher
-from app.domains.connectors.schemas import ConnectorRead
+from app.domains.connectors.schemas import ConnectorRead, ConnectorToolsRead
 from app.domains.connectors.service import ConnectorService
+from app.worker.mcp_client import McpToolLister
 
 
 class ConnectorsController:
@@ -52,6 +54,38 @@ class ConnectorsController:
         )
         return ApiEnvelope[ConnectorRead](
             data=connector,
+            error=None,
+            metadata=ApiMetadata(request_id=request_id_ctx.get()),
+            pagination=None,
+        )
+
+    async def delete(
+        self,
+        user_sso: str,
+        connector_id: uuid.UUID,
+        *,
+        caller: CurrentUser,
+    ) -> None:
+        await self._service.delete_connector(user_sso, connector_id, caller=caller)
+
+    async def list_tools(
+        self,
+        user_sso: str,
+        connector_id: uuid.UUID,
+        *,
+        caller: CurrentUser,
+        cipher: SecretCipher | None,
+        list_tools: McpToolLister,
+    ) -> ApiEnvelope[ConnectorToolsRead]:
+        tools = await self._service.list_connector_tools(
+            user_sso,
+            connector_id,
+            caller=caller,
+            cipher=cipher,
+            list_tools=list_tools,
+        )
+        return ApiEnvelope[ConnectorToolsRead](
+            data=tools,
             error=None,
             metadata=ApiMetadata(request_id=request_id_ctx.get()),
             pagination=None,

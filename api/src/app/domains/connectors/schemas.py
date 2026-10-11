@@ -15,3 +15,9 @@ class ConnectorRead(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ConnectorToolsRead(BaseModel):
+    connector_id: uuid.UUID
+    type: str
+    tools: list[str]

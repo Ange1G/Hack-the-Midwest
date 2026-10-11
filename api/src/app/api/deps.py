@@ -19,10 +19,16 @@ from app.domains.executions.service import ExecutionService
 from app.domains.chains.controller import ChainsController
 from app.domains.chains.repository import SqlAlchemyChainRepository
 from app.domains.chains.service import ChainService
+from app.domains.integrations.service import IntegrationService
+from app.domains.knowledge.repository import SqlAlchemyKnowledgeRepository
+from app.domains.knowledge.service import KnowledgeService
+from app.domains.memory.repository import SqlAlchemyMemoryRepository
+from app.domains.memory.service import MemoryService
 from app.domains.webhooks.controller import WebhooksController
 from app.domains.webhooks.rate_limit import webhook_rate_limiter
 from app.domains.webhooks.repository import SqlAlchemyWebhookRepository
 from app.domains.webhooks.service import WebhookService
+from app.worker.mcp_client import McpToolLister, list_mcp_tools
 
 
 async def get_current_user(
@@ -77,16 +83,47 @@ async def get_connector_repository(
 
 async def get_connectors_controller(
     repository: SqlAlchemyConnectorRepository = Depends(get_connector_repository),
+    session: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> ConnectorsController:
-    return ConnectorsController(service=ConnectorService(repository), settings=settings)
+    agents = SqlAlchemyAgentRepository(session)
+    return ConnectorsController(
+        service=ConnectorService(repository, agents), settings=settings
+    )
+
+
+def get_mcp_tool_lister() -> McpToolLister:
+    return list_mcp_tools
+
+
+async def get_knowledge_service(
+    repository: SqlAlchemyConnectorRepository = Depends(get_connector_repository),
+    session: AsyncSession = Depends(get_db),
+) -> KnowledgeService:
+    return KnowledgeService(SqlAlchemyKnowledgeRepository(session), repository)
+
+
+async def get_memory_service(session: AsyncSession = Depends(get_db)) -> MemoryService:
+    return MemoryService(SqlAlchemyMemoryRepository(session), SqlAlchemyAgentRepository(session))
+
+
+async def get_integration_service(
+    repository: SqlAlchemyConnectorRepository = Depends(get_connector_repository),
+    session: AsyncSession = Depends(get_db),
+) -> IntegrationService:
+    agents = SqlAlchemyAgentRepository(session)
+    return IntegrationService(ConnectorService(repository, agents))
 
 
 def _execution_and_chain_services(
     session: AsyncSession, settings: Settings
 ) -> tuple[ExecutionService, ChainService]:
     agents = SqlAlchemyAgentRepository(session)
-    executions = ExecutionService(SqlAlchemyExecutionRepository(session), agents)
+    executions = ExecutionService(
+        SqlAlchemyExecutionRepository(session),
+        agents,
+        memory=SqlAlchemyMemoryRepository(session),
+    )
     chains = ChainService(SqlAlchemyChainRepository(session), agents, executions)
     executions.set_terminal_hook(chains.orchestrator(settings).on_execution_terminal)
     return executions, chains

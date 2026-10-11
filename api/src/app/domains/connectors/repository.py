@@ -38,6 +38,10 @@ class ConnectorRepository(Protocol):
         self, owner_user_sso: str, ids: Collection[uuid.UUID]
     ) -> list[ConnectorWithSecrets]: ...
 
+    async def delete_owned(
+        self, owner_user_sso: str, connector_id: uuid.UUID
+    ) -> bool: ...
+
 
 class SqlAlchemyConnectorRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -118,3 +122,15 @@ class SqlAlchemyConnectorRepository:
         for secret in rows.scalars():
             ciphertexts.setdefault(secret.connector_id, {})[secret.field_name] = secret.ciphertext
         return [ConnectorWithSecrets(c, ciphertexts.get(c.id, {})) for c in connectors]
+
+    async def delete_owned(self, owner_user_sso: str, connector_id: uuid.UUID) -> bool:
+        """Delete a connector that belongs to owner_user_sso. Returns False if not found or wrong owner."""
+        result = await self._session.execute(
+            select(Connector).where(Connector.id == connector_id)
+        )
+        connector = result.scalar_one_or_none()
+        if connector is None or connector.owner_user_sso != owner_user_sso:
+            return False
+        await self._session.delete(connector)
+        await self._session.commit()
+        return True
