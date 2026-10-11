@@ -81,6 +81,12 @@ async def get_connector_repository(
     return SqlAlchemyConnectorRepository(session)
 
 
+async def get_chain_repository(
+    session: AsyncSession = Depends(get_db),
+) -> SqlAlchemyChainRepository:
+    return SqlAlchemyChainRepository(session)
+
+
 async def get_connectors_controller(
     repository: SqlAlchemyConnectorRepository = Depends(get_connector_repository),
     session: AsyncSession = Depends(get_db),

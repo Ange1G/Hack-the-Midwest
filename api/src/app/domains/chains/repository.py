@@ -21,6 +21,10 @@ class ChainRepository(Protocol):
 
     async def delete_owned(self, owner_user_sso: str, chain_id: uuid.UUID) -> bool: ...
 
+    async def any_chain_references_agent(
+        self, owner_user_sso: str, agent_id: uuid.UUID
+    ) -> bool: ...
+
     async def create_run(self, run: ChainRun, steps: list[ChainRunStep]) -> ChainRun: ...
 
     async def get_run_owned(self, owner_user_sso: str, run_id: uuid.UUID) -> ChainRun | None: ...
@@ -91,6 +95,21 @@ class SqlAlchemyChainRepository:
         await self._session.delete(chain)
         await self._session.commit()
         return True
+
+    async def any_chain_references_agent(
+        self, owner_user_sso: str, agent_id: uuid.UUID
+    ) -> bool:
+        """Return True if the owner has at least one chain that contains agent_id as a step."""
+        result = await self._session.execute(
+            select(AgentChainStep.id)
+            .join(AgentChain, AgentChain.id == AgentChainStep.chain_id)
+            .where(
+                AgentChain.owner_user_sso == owner_user_sso,
+                AgentChainStep.agent_id == agent_id,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
 
     async def create_run(self, run: ChainRun, steps: list[ChainRunStep]) -> ChainRun:
         self._session.add(run)

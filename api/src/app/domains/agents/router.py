@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, Query
 
 from app.core.auth import CurrentUser
-from app.api.deps import get_agents_controller, get_current_user
+from app.api.deps import get_agents_controller, get_chain_repository, get_current_user
 from app.common.envelope import ApiEnvelope
 from app.core.config import Settings, get_settings
 from app.domains.agents.controller import AgentsController
@@ -12,6 +12,7 @@ from fastapi import status
 
 from app.api.deps import get_connector_repository
 from app.domains.agents.schemas import AgentCreate, AgentUpdate
+from app.domains.chains.repository import SqlAlchemyChainRepository
 from app.domains.connectors.repository import SqlAlchemyConnectorRepository
 
 router = APIRouter()
@@ -68,3 +69,14 @@ async def update_agent(
     return await controller.update(
         user_sso, agent_id, body, caller=caller, connectors=connectors
     )
+
+
+@router.delete("/{user_sso}/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_agent(
+    user_sso: str,
+    agent_id: uuid.UUID,
+    controller: AgentsController = Depends(get_agents_controller),
+    caller: CurrentUser = Depends(get_current_user),
+    chains: SqlAlchemyChainRepository = Depends(get_chain_repository),
+) -> None:
+    await controller.delete(user_sso, agent_id, caller=caller, chains=chains)

@@ -7,7 +7,7 @@ from app.core.config import Settings
 from app.core.request_context import request_id_ctx
 from app.domains.agents.schemas import AgentRead
 from app.domains.agents.schemas import AgentCreate, AgentUpdate
-from app.domains.agents.service import ConnectorLookup
+from app.domains.agents.service import ChainGuard, ConnectorLookup
 from app.domains.agents.service import AgentService
 
 
@@ -100,3 +100,13 @@ class AgentsController:
             metadata=ApiMetadata(request_id=request_id_ctx.get()),
             pagination=None,
         )
+
+    async def delete(
+        self,
+        user_sso: str,
+        agent_id: uuid.UUID,
+        *,
+        caller: CurrentUser,
+        chains: ChainGuard,
+    ) -> None:
+        await self._service.delete_agent(user_sso, agent_id, caller=caller, chains=chains)

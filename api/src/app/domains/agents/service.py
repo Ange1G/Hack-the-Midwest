@@ -140,6 +140,26 @@ class AgentService:
             raise NotFoundError("Agent not found")
         return AgentRead.model_validate(agent)
 
+    async def delete_agent(
+        self,
+        owner_user_sso: str,
+        agent_id: uuid.UUID,
+        *,
+        caller: CurrentUser,
+        chains: "ChainGuard",
+    ) -> None:
+        self._ensure_caller_may_access(owner_user_sso, caller)
+        if await chains.any_chain_references_agent(owner_user_sso, agent_id):
+            raise AppError(
+                code="agent_in_use",
+                message="Agent is a step in one or more chains and cannot be deleted",
+                status_code=409,
+            )
+        await self._repository.detach_delegate(owner_user_sso, agent_id)
+        deleted = await self._repository.delete_owned(owner_user_sso, agent_id)
+        if not deleted:
+            raise NotFoundError("Agent not found")
+
     async def _delegate_errors(
         self,
         configurations: AgentConfigurations,
@@ -162,6 +182,12 @@ class ConnectorLookup(Protocol):
     async def types_by_id(
         self, owner_user_sso: str, ids: Collection[uuid.UUID]
     ) -> dict[uuid.UUID, str]: ...
+
+
+class ChainGuard(Protocol):
+    async def any_chain_references_agent(
+        self, owner_user_sso: str, agent_id: uuid.UUID
+    ) -> bool: ...
 
 
 async def _connector_reference_errors(
