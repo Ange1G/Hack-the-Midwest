@@ -73,10 +73,10 @@ The production message broker, container scheduling strategy, and authentication
 ├── README.md                  # This file
 ├── api/                       # FastAPI backend
 │   ├── src/app/
-│   │   ├── domains/           # agents/, connectors/, executions/, primitives/, webhooks/
+│   │   ├── domains/           # agents/, connectors/, executions/, primitives/, webhooks/, chains/
 │   │   ├── worker/            # loop.py, docker_runner.py, bundle.py, runner.py
 │   │   └── core/              # config, database, secrets, auth, exceptions
-│   ├── alembic/versions/      # Migrations 001–007
+│   ├── alembic/versions/      # Migrations 001–009
 │   ├── tests/unit/
 │   ├── tests/integration/
 │   ├── .env.example
@@ -113,14 +113,22 @@ All user-facing routes are under `/api/v1`. Dev/test auth: `X-Dev-User-SSO: <sso
 | Create agent | `POST /api/v1/agents/{user_sso}` | 201 | References connector UUIDs |
 | List agents | `GET /api/v1/agents/{user_sso}` | 200 | Paginated |
 | Get agent | `GET /api/v1/agents/{user_sso}/{agent_id}` | 200 | |
+| Update agent | `PATCH /api/v1/agents/{user_sso}/{agent_id}` | 200 | Title, prompt, and/or full `configurations` replace |
 | Enqueue execution | `POST /api/v1/agents/{user_sso}/{agent_id}/executions` | 202 | Returns immediately; worker runs async |
 | Get execution | `GET /api/v1/agents/{user_sso}/executions/{execution_id}` | 200 | Poll until terminal status |
 | List executions | `GET /api/v1/agents/{user_sso}/executions` | 200 | Paginated |
 | Internal callback | `POST /api/v1/internal/executions/{execution_id}/complete` | 200 | Container → API; token-authenticated |
-| Create webhook | `POST /api/v1/webhooks/{user_sso}` | 201 | HMAC secret returned once |
+| Create webhook | `POST /api/v1/webhooks/{user_sso}` | 201 | HMAC secret returned once; `target_type` `agent` or `chain` |
 | List webhooks | `GET /api/v1/webhooks/{user_sso}` | 200 | Secret masked |
 | Delete webhook | `DELETE /api/v1/webhooks/{user_sso}/{webhook_id}` | 204 | |
-| Fire webhook | `POST /api/v1/hooks/{webhook_id}` | 202 | HMAC only; no SSO |
+| Fire webhook | `POST /api/v1/hooks/{webhook_id}` | 202 | HMAC only; no SSO; agent → execution, chain → chain run |
+| Create chain | `POST /api/v1/chains/{user_sso}` | 201 | Ordered agent IDs; owner-only |
+| List chains | `GET /api/v1/chains/{user_sso}` | 200 | Paginated |
+| Get chain | `GET /api/v1/chains/{user_sso}/{chain_id}` | 200 | Includes ordered steps |
+| Delete chain | `DELETE /api/v1/chains/{user_sso}/{chain_id}` | 204 | |
+| Enqueue chain run | `POST /api/v1/chains/{user_sso}/{chain_id}/runs` | 202 | Sequential steps; optional `{ "input" }` |
+| Get chain run | `GET /api/v1/chains/{user_sso}/runs/{chain_run_id}` | 200 | Status + final result only |
+| Get chain run steps | `GET /api/v1/chains/{user_sso}/runs/{chain_run_id}/steps` | 200 | Ordered audit trail |
 
 Execution status lifecycle: `queued` → `running` → `succeeded` | `failed` | `timed_out`.
 

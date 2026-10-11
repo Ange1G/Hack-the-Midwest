@@ -1,13 +1,13 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { AgentForm } from "#/components/agents/agent-form";
 import { PageHeader } from "#/components/layout/page";
-import { Notice } from "#/components/notice";
 import { ErrorState, LoadingState } from "#/components/states";
 import { useAgent } from "#/lib/api/queries";
 import { textLinkClass } from "#/lib/styles";
 
 export function AgentEdit({ agentId }: { agentId: string }) {
 	const agent = useAgent(agentId);
+	const navigate = useNavigate();
 
 	if (agent.isPending) {
 		return <LoadingState label="Loading agent…" />;
@@ -37,13 +37,15 @@ export function AgentEdit({ agentId }: { agentId: string }) {
 					</Link>
 				}
 			/>
-			<Notice tone="info" className="mb-6" title="Saving is not available yet">
-				<p>
-					You can review this agent's current configuration. Changes cannot be
-					saved yet.
-				</p>
-			</Notice>
-			<AgentForm agent={agent.data} readOnly />
+			<AgentForm
+				agent={agent.data}
+				onSaved={(updated) =>
+					void navigate({
+						to: "/agents/$agentId",
+						params: { agentId: updated.id },
+					})
+				}
+			/>
 		</>
 	);
 }

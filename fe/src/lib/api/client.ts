@@ -169,6 +169,13 @@ export const api = {
 		options?: RequestOptions,
 	) =>
 		request(path, "POST", schema, body, options).then((result) => result.data),
+	patch: <T>(
+		path: string,
+		schema: z.ZodType<T>,
+		body?: unknown,
+		options?: RequestOptions,
+	) =>
+		request(path, "PATCH", schema, body, options).then((result) => result.data),
 	postVoid: async (path: string, body?: unknown): Promise<void> => {
 		await send(path, "POST", body, {});
 	},

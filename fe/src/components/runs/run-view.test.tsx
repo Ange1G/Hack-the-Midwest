@@ -7,6 +7,18 @@ import { signInAs } from "#/test/session";
 import { RunView } from "./run-view";
 
 describe("RunView", () => {
+	it("shows the run input when one was supplied", async () => {
+		const owner = signInAs();
+		const agent = createAgent(owner.user_sso, safeAgentInput);
+		const run = createRun(agent, "ticket INC-7");
+		runToCompletion(run);
+
+		renderWithProviders(<RunView runId={run.id} pollIntervalMs={5} />);
+
+		expect(await screen.findByText("ticket INC-7")).toBeInTheDocument();
+		expect(screen.getByText("Run input")).toBeInTheDocument();
+	});
+
 	it("polls a run from queued to succeeded and shows its output", async () => {
 		const owner = signInAs();
 		const agent = createAgent(owner.user_sso, safeAgentInput);

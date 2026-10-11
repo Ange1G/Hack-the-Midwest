@@ -3,9 +3,15 @@ import { z } from "zod";
 import {
 	agentInputSchema,
 	agentSchema,
+	chainCreateSchema,
+	chainRunSchema,
+	chainSchema,
+	connectorCreateSchema,
 	envelope,
+	executionCreateSchema,
 	findingSchema,
 	runSchema,
+	webhookSchema,
 } from "./schemas";
 
 // Exactly what POST/GET /api/v1/agents/{user_sso} return per the backend's
@@ -37,6 +43,7 @@ const validRun = {
 	agent_id: backendAgent.id,
 	owner_user_sso: "sso-user-a",
 	status: "queued",
+	input: null,
 	result: null,
 	error_code: null,
 	error_message: null,
@@ -52,12 +59,9 @@ const validInput = {
 	systemPrompt: "Summarize yesterday's new issues.",
 	configurations: {
 		primitives: {
-			list_issues: {
-				contractVersion: 1,
-				method: "GET",
-				URL: "https://api.github.com/repos/acme/web/issues",
-				xApiKey: "key-live-123",
-				options: { retries: 3, timeout: 10000 },
+			"0b1f1c6a-4f4e-4b1b-9d2a-1c9c3b2d7e12": {},
+			"0b1f1c6a-4f4e-4b1b-9d2a-1c9c3b2d7e13": {
+				allowedTools: ["search_issues"],
 			},
 		},
 		dayOfWeek: [1, 2, 3, 4, 5],
@@ -80,9 +84,9 @@ describe("agentSchema", () => {
 			title: "Weekday GitHub digest",
 			owner_user_sso: "sso-user-a",
 		});
-		expect(parsed.configurations.primitives["0b1f1c6a-4f4e-4b1b-9d2a-1c9c3b2d7e12"]).toEqual(
-			{},
-		);
+		expect(
+			parsed.configurations.primitives["0b1f1c6a-4f4e-4b1b-9d2a-1c9c3b2d7e12"],
+		).toEqual({});
 		expect(
 			parsed.configurations.primitives["0b1f1c6a-4f4e-4b1b-9d2a-1c9c3b2d7e13"],
 		).toEqual({ allowedTools: ["search_issues"] });
@@ -136,78 +140,21 @@ describe("agentInputSchema", () => {
 		expect(messages).toContain("Instructions are required");
 	});
 
-	it("requires identifier-style primitive names", () => {
-		const messages = issueMessages({
-			...validInput,
-			configurations: {
-				...validInput.configurations,
-				primitives: {
-					"List Issues": validInput.configurations.primitives.list_issues,
-				},
-			},
-		});
-		expect(messages.join(" ")).toMatch(
-			/lowercase letters, numbers and underscores/i,
-		);
+	it("accepts connector UUID references and MCP allowedTools", () => {
+		expect(agentInputSchema.safeParse(validInput).success).toBe(true);
 	});
 
-	it("refuses URLs the backend would refuse, with the backend's message", () => {
+	it("refuses an empty allowedTools list", () => {
 		const messages = issueMessages({
 			...validInput,
 			configurations: {
 				...validInput.configurations,
 				primitives: {
-					scrape: {
-						contractVersion: 1,
-						method: "GET",
-						URL: "http://169.254.169.254/latest/meta-data/",
-					},
+					"0b1f1c6a-4f4e-4b1b-9d2a-1c9c3b2d7e13": { allowedTools: [] },
 				},
 			},
 		});
-		expect(messages).toContain(
-			"Private, loopback and link-local addresses are not allowed",
-		);
-	});
-
-	it("refuses a payload on a GET contract", () => {
-		const messages = issueMessages({
-			...validInput,
-			configurations: {
-				...validInput.configurations,
-				primitives: {
-					fetch: {
-						contractVersion: 1,
-						method: "GET",
-						URL: "https://api.example.com/items",
-						payload: { page: 1 },
-					},
-				},
-			},
-		});
-		expect(messages.join(" ")).toMatch(
-			/GET requests cannot include a payload/i,
-		);
-	});
-
-	it("refuses the masked placeholder as a credential and bounds options", () => {
-		const messages = issueMessages({
-			...validInput,
-			configurations: {
-				...validInput.configurations,
-				primitives: {
-					notify: {
-						contractVersion: 1,
-						method: "POST",
-						URL: "https://hooks.example.com/notify",
-						xApiKey: "********",
-						options: { retries: 9, timeout: 10 },
-					},
-				},
-			},
-		});
-		expect(messages.join(" ")).toMatch(/actual credential/i);
-		expect(messages.length).toBeGreaterThanOrEqual(3);
+		expect(messages).toContain("List at least one tool");
 	});
 
 	it("bounds the schedule values", () => {
@@ -284,6 +231,144 @@ describe("runSchema", () => {
 		expect(() =>
 			runSchema.parse({ ...validRun, status: "exploded" }),
 		).toThrow();
+	});
+});
+
+describe("executionCreateSchema", () => {
+	it("trims input and drops blank values", () => {
+		expect(executionCreateSchema.parse({ input: "  ticket  " })).toEqual({
+			input: "ticket",
+		});
+		expect(executionCreateSchema.parse({ input: "   " })).toEqual({});
+		expect(executionCreateSchema.parse({})).toEqual({});
+	});
+
+	it("refuses input longer than 20_000 characters", () => {
+		expect(
+			executionCreateSchema.safeParse({ input: "x".repeat(20_001) }).success,
+		).toBe(false);
+	});
+});
+
+describe("connectorCreateSchema", () => {
+	it("refuses private HTTP URLs", () => {
+		const result = connectorCreateSchema.safeParse({
+			type: "http",
+			contractVersion: 1,
+			name: "scrape",
+			config: {
+				method: "GET",
+				URL: "http://169.254.169.254/latest/meta-data/",
+			},
+		});
+		expect(result.success).toBe(false);
+		if (result.success) return;
+		expect(result.error.issues.map((issue) => issue.message)).toContain(
+			"Private, loopback and link-local addresses are not allowed",
+		);
+	});
+
+	it("accepts MCP and external database bodies", () => {
+		expect(
+			connectorCreateSchema.safeParse({
+				type: "mcp",
+				contractVersion: 1,
+				name: "linear",
+				config: { URL: "https://mcp.linear.example.com/mcp" },
+			}).success,
+		).toBe(true);
+		expect(
+			connectorCreateSchema.safeParse({
+				type: "database",
+				contractVersion: 1,
+				name: "orders_db",
+				credentials: { username: "reader", password: "db-secret-456" },
+				config: {
+					mode: "external",
+					engine: "postgres",
+					host: "db.example.com",
+					database: "orders",
+				},
+			}).success,
+		).toBe(true);
+	});
+});
+
+describe("webhookSchema", () => {
+	it("parses a webhook as the backend returns it", () => {
+		const webhook = {
+			id: "wh_1",
+			owner_user_sso: "sso-user-a",
+			target_type: "agent",
+			target_agent_id: backendAgent.id,
+			secret: "********",
+			disabled: false,
+			created_at: "2026-10-21T12:00:00Z",
+		};
+		expect(webhookSchema.parse(webhook)).toEqual(webhook);
+	});
+
+	it("defaults a missing target_type to agent", () => {
+		const parsed = webhookSchema.parse({
+			id: "wh_1",
+			owner_user_sso: "sso-user-a",
+			target_agent_id: backendAgent.id,
+			secret: "********",
+			disabled: false,
+			created_at: "2026-10-21T12:00:00Z",
+		});
+		expect(parsed.target_type).toBe("agent");
+	});
+});
+
+describe("chainSchema", () => {
+	it("parses a chain with ordered steps and optional schedule", () => {
+		const chain = {
+			id: "chn_1",
+			owner_user_sso: "sso-user-a",
+			title: "Triage then summarize",
+			schedule: { dayOfWeek: [1], timeOfDay: [540] },
+			steps: [
+				{ position: 0, agent_id: backendAgent.id, label: "Triage" },
+				{ position: 1, agent_id: backendAgent.id, label: null },
+			],
+			created_at: "2026-10-21T12:00:00Z",
+			updated_at: "2026-10-21T12:00:00Z",
+		};
+		expect(chainSchema.parse(chain)).toEqual(chain);
+	});
+
+	it("requires a title and at least one step on create", () => {
+		const result = chainCreateSchema.safeParse({
+			title: "   ",
+			steps: [],
+		});
+		expect(result.success).toBe(false);
+		if (result.success) return;
+		const messages = result.error.issues.map((issue) => issue.message);
+		expect(messages).toContain("Name is required");
+		expect(messages).toContain("Add at least one step");
+	});
+});
+
+describe("chainRunSchema", () => {
+	it("parses a running chain run without a final result", () => {
+		const run = {
+			id: "crun_1",
+			chain_id: "chn_1",
+			owner_user_sso: "sso-user-a",
+			status: "running",
+			input: "INC-1",
+			trigger: "api",
+			final_result: null,
+			error_code: null,
+			error_message: null,
+			started_at: "2026-10-21T12:00:00Z",
+			finished_at: null,
+			created_at: "2026-10-21T12:00:00Z",
+			updated_at: "2026-10-21T12:00:00Z",
+		};
+		expect(chainRunSchema.parse(run)).toEqual(run);
 	});
 });
 

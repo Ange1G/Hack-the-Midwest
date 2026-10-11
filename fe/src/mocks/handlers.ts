@@ -3,13 +3,30 @@ import type { z } from "zod";
 import { API_BASE_URL, DEV_USER_HEADER } from "#/lib/api/client";
 import {
 	type Agent,
-	type AgentConfigurations,
 	agentInputSchema,
+	agentUpdateSchema,
+	chainCreateSchema,
 	connectorCreateSchema,
+	connectorTypeCatalogSchema,
+	executionCreateSchema,
 	type Pagination,
 	type Run,
+	webhookCreateSchema,
 } from "#/lib/api/schemas";
-import { advanceRun, createAgent, createConnector, createRun, mockState, now } from "./state";
+import {
+	advanceChainRun,
+	advanceRun,
+	chainRunSummary,
+	createChain,
+	createChainRun,
+	createConnector,
+	createRun,
+	createWebhook,
+	insertAgent,
+	maskedWebhook,
+	mockState,
+	updateAgent,
+} from "./state";
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
@@ -147,48 +164,20 @@ export const handlers = [
 		const owner = caller(request);
 		if (!owner) return unauthorized();
 		if (owner !== String(params.sso)) return forbidden();
-		const raw = await request.json();
-		const asForm = agentInputSchema.safeParse(raw);
-		if (asForm.success) {
-			return ok(createAgent(owner, asForm.data), { status: 201 });
-		}
-		const body = raw as {
-			agentTitle?: string;
-			systemPrompt?: string;
-			configurations?: {
-				primitives?: AgentConfigurations["primitives"];
-				month?: number | null;
-				dayOfWeek?: number[];
-				timeOfDay?: number[];
-			};
-		};
-		if (!body?.agentTitle?.trim() || !body?.systemPrompt?.trim()) {
-			return requestValidationError(asForm.error.issues);
-		}
-		const timestamp = now();
-		const agent: Agent = {
-			id: `agt_${++mockState.counter}`,
-			title: body.agentTitle.trim(),
-			system_prompt: body.systemPrompt.trim(),
-			configurations: {
-				primitives: body.configurations?.primitives ?? {},
-				...(body.configurations?.month != null
-					? { month: body.configurations.month }
-					: {}),
-				dayOfWeek: body.configurations?.dayOfWeek ?? [],
-				timeOfDay: body.configurations?.timeOfDay ?? [],
-			},
-			schedule_month: null,
-			schedule_day: null,
-			schedule_time: null,
-			owner_user_sso: owner,
-			created_at: timestamp,
-			updated_at: timestamp,
-			flagged: false,
-			last_run: null,
-		};
-		mockState.agents.push(agent);
-		return ok(agent, { status: 201 });
+		const parsed = agentInputSchema.safeParse(await request.json());
+		if (!parsed.success) return requestValidationError(parsed.error.issues);
+		return ok(insertAgent(owner, parsed.data), { status: 201 });
+	}),
+
+	http.patch(url("/agents/:sso/:id"), async ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const agent = ownAgent(owner, String(params.id));
+		if (!agent) return notFound();
+		const parsed = agentUpdateSchema.safeParse(await request.json());
+		if (!parsed.success) return requestValidationError(parsed.error.issues);
+		return ok(updateAgent(agent, parsed.data));
 	}),
 
 	http.get(url("/agents/:sso/executions"), ({ request, params }) => {
@@ -233,13 +222,52 @@ export const handlers = [
 		return new HttpResponse(null, { status: 204 });
 	}),
 
-	http.post(url("/agents/:sso/:id/executions"), ({ request, params }) => {
+	http.post(url("/agents/:sso/:id/executions"), async ({ request, params }) => {
 		const owner = caller(request);
 		if (!owner) return unauthorized();
 		if (owner !== String(params.sso)) return forbidden();
 		const agent = ownAgent(owner, String(params.id));
 		if (!agent) return notFound();
-		return ok(createRun(agent), { status: 202 });
+		let input: string | null = null;
+		const raw = await request.text();
+		if (raw.trim()) {
+			const parsed = executionCreateSchema.safeParse(JSON.parse(raw));
+			if (!parsed.success) {
+				return requestValidationError(parsed.error.issues);
+			}
+			input = parsed.data.input ?? null;
+		}
+		return ok(createRun(agent, input), { status: 202 });
+	}),
+
+	http.get(url("/connector-types"), ({ request }) => {
+		if (!caller(request)) return unauthorized();
+		return ok(
+			connectorTypeCatalogSchema.array().parse([
+				{
+					type: "http",
+					name: "HTTP request",
+					description: "Call an HTTP API endpoint with a fixed method and URL.",
+					credential_fields: ["xApiKey", "authorizationHeader"],
+					config_schema: {},
+				},
+				{
+					type: "mcp",
+					name: "MCP server",
+					description: "Use tools from a remote MCP server you provide.",
+					credential_fields: ["xApiKey", "authorizationHeader"],
+					config_schema: {},
+				},
+				{
+					type: "database",
+					name: "Database",
+					description:
+						"Use a PostgreSQL, MySQL, MongoDB or Redis database: one you run, or one the platform starts for the agent.",
+					credential_fields: ["username", "password"],
+					config_schema: {},
+				},
+			]),
+		);
 	}),
 
 	http.get(url("/connectors/:sso"), ({ request, params }) => {
@@ -282,5 +310,142 @@ export const handlers = [
 			}
 			throw error;
 		}
+	}),
+
+	http.get(url("/webhooks/:sso"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const items = newestFirst(
+			mockState.webhooks
+				.filter((item) => item.owner_user_sso === owner)
+				.map(maskedWebhook),
+		);
+		const page = paginate(items, request);
+		return ok(page.data, { pagination: page.pagination });
+	}),
+
+	http.post(url("/webhooks/:sso"), async ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const parsed = webhookCreateSchema.safeParse(await request.json());
+		if (!parsed.success) return requestValidationError(parsed.error.issues);
+		if (parsed.data.target_type === "chain") {
+			const chain = mockState.chains.find(
+				(item) =>
+					item.id === parsed.data.target_chain_id &&
+					item.owner_user_sso === owner,
+			);
+			if (!chain) return fail(404, "not_found", "Chain not found");
+		} else if (!ownAgent(owner, parsed.data.target_agent_id ?? "")) {
+			return fail(404, "not_found", "Agent not found");
+		}
+		return ok(createWebhook(owner, parsed.data), { status: 201 });
+	}),
+
+	http.delete(url("/webhooks/:sso/:id"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const webhook = mockState.webhooks.find(
+			(item) => item.id === String(params.id) && item.owner_user_sso === owner,
+		);
+		if (!webhook) return notFound();
+		mockState.webhooks = mockState.webhooks.filter((item) => item !== webhook);
+		mockState.webhookSecrets.delete(webhook.id);
+		return new HttpResponse(null, { status: 204 });
+	}),
+
+	http.get(url("/chains/:sso"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const items = newestFirst(
+			mockState.chains.filter((item) => item.owner_user_sso === owner),
+		);
+		const page = paginate(items, request);
+		return ok(page.data, { pagination: page.pagination });
+	}),
+
+	http.post(url("/chains/:sso"), async ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const parsed = chainCreateSchema.safeParse(await request.json());
+		if (!parsed.success) return requestValidationError(parsed.error.issues);
+		for (const step of parsed.data.steps) {
+			if (!ownAgent(owner, step.agent_id)) {
+				return fail(422, "invalid_chain", "Chain definition is invalid", {
+					errors: [{ field: "steps.0.agent_id", message: "Agent not found" }],
+				});
+			}
+		}
+		return ok(createChain(owner, parsed.data), { status: 201 });
+	}),
+
+	http.get(url("/chains/:sso/runs/:runId"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const run = mockState.chainRuns.find(
+			(item) =>
+				item.id === String(params.runId) && item.owner_user_sso === owner,
+		);
+		if (!run) return notFound();
+		if (run.status === "running") advanceChainRun(run);
+		return ok(chainRunSummary(run));
+	}),
+
+	http.get(url("/chains/:sso/runs/:runId/steps"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const run = mockState.chainRuns.find(
+			(item) =>
+				item.id === String(params.runId) && item.owner_user_sso === owner,
+		);
+		if (!run) return notFound();
+		return ok(mockState.chainRunSteps.get(run.id) ?? []);
+	}),
+
+	http.get(url("/chains/:sso/:id"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const chain = mockState.chains.find(
+			(item) => item.id === String(params.id) && item.owner_user_sso === owner,
+		);
+		return chain ? ok(chain) : notFound();
+	}),
+
+	http.delete(url("/chains/:sso/:id"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const chain = mockState.chains.find(
+			(item) => item.id === String(params.id) && item.owner_user_sso === owner,
+		);
+		if (!chain) return notFound();
+		mockState.chains = mockState.chains.filter((item) => item !== chain);
+		return new HttpResponse(null, { status: 204 });
+	}),
+
+	http.post(url("/chains/:sso/:id/runs"), async ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const chain = mockState.chains.find(
+			(item) => item.id === String(params.id) && item.owner_user_sso === owner,
+		);
+		if (!chain) return notFound();
+		let input: string | null = null;
+		const raw = await request.text();
+		if (raw.trim()) {
+			const parsed = executionCreateSchema.safeParse(JSON.parse(raw));
+			if (!parsed.success) return requestValidationError(parsed.error.issues);
+			input = parsed.data.input ?? null;
+		}
+		return ok(createChainRun(chain, input), { status: 202 });
 	}),
 ];

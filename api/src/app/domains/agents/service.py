@@ -12,7 +12,7 @@ from app.common.validation_errors import describe_validation_errors
 from app.core.exceptions import AppError, NotFoundError
 from app.domains.agents.configurations import AgentConfigurations
 from app.domains.agents.models import Agent
-from app.domains.agents.schemas import AgentCreate
+from app.domains.agents.schemas import AgentCreate, AgentUpdate
 from app.domains.agents.repository import AgentRepository
 from app.domains.agents.schemas import AgentRead
 
@@ -79,6 +79,49 @@ class AgentService:
         )
         created = await self._repository.create(agent)
         return AgentRead.model_validate(created)
+
+    async def update_agent(
+        self,
+        owner_user_sso: str,
+        agent_id: uuid.UUID,
+        body: AgentUpdate,
+        *,
+        caller: CurrentUser,
+        connectors: "ConnectorLookup",
+    ) -> AgentRead:
+        self._ensure_caller_may_access(owner_user_sso, caller)
+        agent = await self._repository.get_owned(owner_user_sso, agent_id)
+        if agent is None:
+            raise NotFoundError("Agent not found")
+        if body.title is None and body.system_prompt is None and body.configurations is None:
+            raise AppError(
+                code="validation_error",
+                message="At least one of title, systemPrompt, or configurations is required",
+                status_code=422,
+            )
+
+        if body.title is not None:
+            agent.title = body.title
+        if body.system_prompt is not None:
+            agent.system_prompt = body.system_prompt
+        if body.configurations is not None:
+            try:
+                configurations = AgentConfigurations.model_validate(body.configurations)
+            except ValidationError as exc:
+                raise _invalid_configuration(
+                    describe_validation_errors(exc, prefix="configurations")
+                ) from None
+            errors = await _connector_reference_errors(
+                configurations, caller.user_sso, connectors
+            )
+            if errors:
+                raise _invalid_configuration(errors)
+            agent.configurations = configurations.model_dump(
+                mode="json", by_alias=True, exclude_none=True
+            )
+
+        updated = await self._repository.save(agent)
+        return AgentRead.model_validate(updated)
 
     async def get_agent(
         self,

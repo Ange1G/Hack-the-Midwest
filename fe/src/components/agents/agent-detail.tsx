@@ -13,7 +13,9 @@ import { StatusBadge } from "#/components/status-badge";
 import { ToneBadge } from "#/components/tone-badge";
 import { Button } from "#/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "#/components/ui/card";
+import { Label } from "#/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
+import { Textarea } from "#/components/ui/textarea";
 import {
 	isActiveRunStatus,
 	useAgent,
@@ -21,8 +23,17 @@ import {
 	useConnectors,
 	useStartRun,
 } from "#/lib/api/queries";
-import type { AgentConfigurations, HttpContract, Run } from "#/lib/api/schemas";
-import { httpContractFromConnector } from "#/lib/api/schemas";
+import type {
+	AgentConfigurations,
+	Connector,
+	HttpContract,
+	Run,
+} from "#/lib/api/schemas";
+import {
+	connectorConfigRecord,
+	connectorLabel,
+	httpContractFromConnector,
+} from "#/lib/api/schemas";
 import { formatDateTime, formatDuration } from "#/lib/format";
 import { minutesToTime } from "#/lib/http-contract";
 import { textLinkClass } from "#/lib/styles";
@@ -58,6 +69,7 @@ export function AgentDetail({
 	const agent = useAgent(agentId);
 	const connectors = useConnectors();
 	const startRun = useStartRun(agentId);
+	const [runInput, setRunInput] = useState("");
 
 	if (agent.isPending) {
 		return <LoadingState label="Loading agent…" />;
@@ -76,13 +88,13 @@ export function AgentDetail({
 	const connectorById = new Map(
 		(connectors.data ?? []).map((item) => [item.id, item]),
 	);
-	const calls = Object.keys(data.configurations.primitives).flatMap((id) => {
-		const connector = connectorById.get(id);
-		if (!connector) return [];
-		const contract = httpContractFromConnector(connector);
-		if (!contract) return [];
-		return [{ id, name: connector.name, contract }];
-	});
+	const attachments = Object.entries(data.configurations.primitives).flatMap(
+		([id, reference]) => {
+			const connector = connectorById.get(id);
+			if (!connector) return [];
+			return [{ id, connector, reference }];
+		},
+	);
 
 	return (
 		<>
@@ -90,17 +102,28 @@ export function AgentDetail({
 				title={data.title}
 				description={`Created ${formatDateTime(data.created_at)}`}
 				action={
-					<Button
-						type="button"
-						disabled={startRun.isPending}
-						onClick={() =>
-							startRun.mutate(undefined, {
-								onSuccess: (run) => onRunStarted(run),
-							})
-						}
-					>
-						{startRun.isPending ? "Starting…" : "Run agent"}
-					</Button>
+					<div className="flex w-full max-w-sm flex-col gap-2">
+						<Label htmlFor="run-input">Run input (optional)</Label>
+						<Textarea
+							id="run-input"
+							value={runInput}
+							onChange={(event) => setRunInput(event.target.value)}
+							placeholder="Passed to the agent as this run's user message"
+							rows={3}
+						/>
+						<Button
+							type="button"
+							disabled={startRun.isPending}
+							onClick={() =>
+								startRun.mutate(
+									{ input: runInput },
+									{ onSuccess: (run) => onRunStarted(run) },
+								)
+							}
+						>
+							{startRun.isPending ? "Starting…" : "Run agent"}
+						</Button>
+					</div>
 				}
 			/>
 
@@ -148,18 +171,21 @@ export function AgentDetail({
 					</Card>
 					<Card className="island-shell">
 						<CardHeader>
-							<CardTitle>HTTP calls</CardTitle>
+							<CardTitle>Connectors</CardTitle>
 						</CardHeader>
 						<CardContent>
-							{calls.length === 0 ? (
+							{attachments.length === 0 ? (
 								<p className="text-sm text-muted-foreground">
-									This agent has no HTTP calls.
+									This agent has no connectors.
 								</p>
 							) : (
 								<ul className="space-y-4">
-									{calls.map((call) => (
-										<li key={call.id}>
-											<CallSummary name={call.name} contract={call.contract} />
+									{attachments.map((item) => (
+										<li key={item.id}>
+											<ConnectorSummary
+												connector={item.connector}
+												allowedTools={item.reference.allowedTools}
+											/>
 										</li>
 									))}
 								</ul>
@@ -180,6 +206,48 @@ export function AgentDetail({
 				</TabsContent>
 			</Tabs>
 		</>
+	);
+}
+
+function ConnectorSummary({
+	connector,
+	allowedTools,
+}: {
+	connector: Connector;
+	allowedTools?: string[];
+}) {
+	const http = httpContractFromConnector(connector);
+	if (http) {
+		return <CallSummary name={connector.name} contract={http} />;
+	}
+	const config = connectorConfigRecord(connector);
+	return (
+		<fieldset className="space-y-2 rounded-lg border border-(--line) p-3">
+			<legend className="px-1 font-mono text-sm font-medium">
+				{connector.name}
+			</legend>
+			<div className="flex flex-wrap items-center gap-2 text-sm">
+				<ToneBadge tone="info">{connectorLabel(connector.type)}</ToneBadge>
+				{typeof config.URL === "string" ? (
+					<code className="break-all">{config.URL}</code>
+				) : null}
+				{typeof config.engine === "string" ? (
+					<span>{String(config.engine)}</span>
+				) : null}
+				{typeof config.host === "string" ? (
+					<code className="break-all">{config.host}</code>
+				) : null}
+				{typeof config.mode === "string" ? (
+					<span className="text-muted-foreground">{config.mode}</span>
+				) : null}
+			</div>
+			{allowedTools && allowedTools.length > 0 ? (
+				<p className="text-sm">
+					<span className="text-muted-foreground">Allowed tools: </span>
+					{allowedTools.join(", ")}
+				</p>
+			) : null}
+		</fieldset>
 	);
 }
 

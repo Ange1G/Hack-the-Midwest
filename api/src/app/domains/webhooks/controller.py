@@ -9,7 +9,6 @@ from app.core.config import Settings
 from app.core.exceptions import AppError
 from app.core.request_context import request_id_ctx
 from app.core.secrets import SecretCipher
-from app.domains.executions.schemas import ExecutionRead
 from app.domains.webhooks.schemas import WebhookCreate, WebhookRead
 from app.domains.webhooks.service import WebhookService
 
@@ -81,7 +80,7 @@ class WebhooksController:
         *,
         signature_header: str | None,
         cipher: SecretCipher | None,
-    ) -> ApiEnvelope[ExecutionRead]:
+    ) -> ApiEnvelope[dict]:
         content_length = request.headers.get("content-length")
         if content_length:
             try:
@@ -101,15 +100,15 @@ class WebhooksController:
                 message="Webhook body exceeds maximum size",
                 status_code=413,
             )
-        execution = await self._service.fire(
+        result = await self._service.fire(
             webhook_id,
             raw_body=raw_body,
             signature_header=signature_header,
             settings=self._settings,
             cipher=cipher,
         )
-        return ApiEnvelope[ExecutionRead](
-            data=execution,
+        return ApiEnvelope[dict](
+            data=result,
             error=None,
             metadata=ApiMetadata(request_id=request_id_ctx.get()),
             pagination=None,

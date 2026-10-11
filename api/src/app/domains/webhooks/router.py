@@ -7,7 +7,6 @@ from app.common.envelope import ApiEnvelope
 from app.core.auth import CurrentUser
 from app.core.config import Settings, get_settings
 from app.core.secrets import SecretCipher
-from app.domains.executions.schemas import ExecutionRead
 from app.domains.webhooks.controller import WebhooksController
 from app.domains.webhooks.schemas import WebhookCreate, WebhookRead
 
@@ -60,7 +59,7 @@ async def fire_webhook(
     controller: WebhooksController = Depends(get_webhooks_controller),
     cipher: SecretCipher | None = Depends(get_secret_cipher),
     x_webhook_signature: str | None = Header(default=None, alias="X-Webhook-Signature"),
-) -> ApiEnvelope[ExecutionRead]:
+) -> ApiEnvelope[dict]:
     return await controller.fire(
         webhook_id,
         request,

@@ -35,6 +35,16 @@ describe("AppShell", () => {
 			"/agents",
 		);
 		expect(
+			within(nav).getByRole("link", { name: /connectors/i }),
+		).toHaveAttribute("href", "/connectors");
+		expect(within(nav).getByRole("link", { name: /chains/i })).toHaveAttribute(
+			"href",
+			"/chains",
+		);
+		expect(
+			within(nav).getByRole("link", { name: /webhooks/i }),
+		).toHaveAttribute("href", "/webhooks");
+		expect(
 			within(nav).getByRole("link", { name: /security/i }),
 		).toHaveAttribute("href", "/security");
 		expect(screen.getByText("angel")).toBeInTheDocument();

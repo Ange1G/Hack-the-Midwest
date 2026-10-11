@@ -89,6 +89,17 @@ export function RunView({
 
 			<Timeline run={data} />
 
+			{data.input ? (
+				<Card className="island-shell mt-6">
+					<CardHeader>
+						<CardTitle>Run input</CardTitle>
+					</CardHeader>
+					<CardContent>
+						<pre className="whitespace-pre-wrap text-sm">{data.input}</pre>
+					</CardContent>
+				</Card>
+			) : null}
+
 			<div className="mt-6 grid gap-6 lg:grid-cols-2">
 				<Card className="island-shell">
 					<CardHeader>

@@ -16,6 +16,9 @@ from app.domains.connectors.service import ConnectorService
 from app.domains.executions.controller import ExecutionsController
 from app.domains.executions.repository import SqlAlchemyExecutionRepository
 from app.domains.executions.service import ExecutionService
+from app.domains.chains.controller import ChainsController
+from app.domains.chains.repository import SqlAlchemyChainRepository
+from app.domains.chains.service import ChainService
 from app.domains.webhooks.controller import WebhooksController
 from app.domains.webhooks.rate_limit import webhook_rate_limiter
 from app.domains.webhooks.repository import SqlAlchemyWebhookRepository
@@ -79,30 +82,44 @@ async def get_connectors_controller(
     return ConnectorsController(service=ConnectorService(repository), settings=settings)
 
 
+def _execution_and_chain_services(
+    session: AsyncSession, settings: Settings
+) -> tuple[ExecutionService, ChainService]:
+    agents = SqlAlchemyAgentRepository(session)
+    executions = ExecutionService(SqlAlchemyExecutionRepository(session), agents)
+    chains = ChainService(SqlAlchemyChainRepository(session), agents, executions)
+    executions.set_terminal_hook(chains.orchestrator(settings).on_execution_terminal)
+    return executions, chains
+
+
 async def get_executions_controller(
     session: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> ExecutionsController:
-    service = ExecutionService(
-        SqlAlchemyExecutionRepository(session),
-        SqlAlchemyAgentRepository(session),
-    )
-    return ExecutionsController(service=service, settings=settings)
+    executions, _ = _execution_and_chain_services(session, settings)
+    return ExecutionsController(service=executions, settings=settings)
 
 
 async def get_webhooks_controller(
     session: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> WebhooksController:
+    executions, chains = _execution_and_chain_services(session, settings)
     agents = SqlAlchemyAgentRepository(session)
-    executions = ExecutionService(
-        SqlAlchemyExecutionRepository(session),
-        agents,
-    )
     service = WebhookService(
         SqlAlchemyWebhookRepository(session),
         agents,
         executions,
         rate_limiter=webhook_rate_limiter,
+        chains=SqlAlchemyChainRepository(session),
+        chain_runs=chains,
     )
     return WebhooksController(service=service, settings=settings)
+
+
+async def get_chains_controller(
+    session: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> ChainsController:
+    _, chains = _execution_and_chain_services(session, settings)
+    return ChainsController(service=chains, settings=settings)

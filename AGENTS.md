@@ -88,7 +88,8 @@ Defer nonessential integrations, advanced orchestration, complex scheduling, and
   - [x] Base layout: sign-in, agents list, agent detail, run view.
   - [x] Create agent with HTTP primitives (UI creates connectors, then agent with UUID references).
   - [x] Start execution and poll `/executions` for status, `result.output`, and errors.
-  - [ ] Agent edit/save, production auth, and security findings UI (stub only).
+  - [x] Connector library (HTTP/MCP/database), library-first agent create/edit, webhook agent|chain targets.
+  - [ ] Production auth and security findings UI (stub only).
 - [ ] Implement authentication and user-level resource isolation.
 - [ ] Implement background monitoring and policy-violation reporting.
 - [ ] Add end-to-end tests for the primary user workflow.

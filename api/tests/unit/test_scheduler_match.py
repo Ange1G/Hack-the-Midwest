@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 from app.domains.agents.configurations import AgentConfigurations
+from app.domains.chains.schemas import ChainSchedule
 from app.scheduler.match import current_slot, matching_slot
 
 
@@ -47,3 +48,11 @@ def test_empty_day_of_week_means_every_day() -> None:
 def test_current_slot_is_date_and_minute() -> None:
     now = datetime(2026, 10, 12, 9, 0, 45, tzinfo=ZoneInfo("UTC"))
     assert current_slot(now) == "2026-10-12:0540"
+
+
+def test_chain_schedule_uses_the_same_matching_rules() -> None:
+    now = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
+    schedule = ChainSchedule.model_validate({"dayOfWeek": [1], "timeOfDay": [540]})
+    assert matching_slot(schedule, now, "UTC") == "2026-10-12:0540"
+    idle = ChainSchedule.model_validate({})
+    assert matching_slot(idle, now, "UTC") is None

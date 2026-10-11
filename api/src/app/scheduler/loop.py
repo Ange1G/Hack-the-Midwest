@@ -12,6 +12,10 @@ from app.core.exceptions import AppError
 from app.domains.agents.configurations import AgentConfigurations
 from app.domains.agents.models import Agent
 from app.domains.agents.repository import SqlAlchemyAgentRepository
+from app.domains.chains.models import AgentChain
+from app.domains.chains.repository import SqlAlchemyChainRepository
+from app.domains.chains.schemas import ChainSchedule
+from app.domains.chains.service import ChainService
 from app.domains.executions.repository import SqlAlchemyExecutionRepository
 from app.domains.executions.service import ExecutionService
 from app.scheduler.match import matching_slot
@@ -33,22 +37,12 @@ async def process_once(
     *,
     now: datetime | None = None,
 ) -> int:
-    """Scan agents and enqueue those whose schedule matches `now`. Returns enqueue count."""
+    """Scan agents and chains whose schedule matches `now`. Returns enqueue count."""
     instant = now or utc_now()
     enqueued = 0
-    page = 1
-    while True:
-        async with session_factory() as session:
-            repo = SchedulerRepository(session)
-            agents = await repo.list_agents(page=page, page_size=AGENT_PAGE_SIZE)
-        if not agents:
-            return enqueued
-        for agent in agents:
-            if await _maybe_enqueue(session_factory, settings, agent, instant):
-                enqueued += 1
-        if len(agents) < AGENT_PAGE_SIZE:
-            return enqueued
-        page += 1
+    enqueued += await _scan_agents(session_factory, settings, instant)
+    enqueued += await _scan_chains(session_factory, settings, instant)
+    return enqueued
 
 
 async def run_forever(
@@ -65,7 +59,49 @@ async def run_forever(
         await asyncio.sleep(settings.scheduler_poll_interval_seconds)
 
 
-async def _maybe_enqueue(
+async def _scan_agents(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    now: datetime,
+) -> int:
+    enqueued = 0
+    page = 1
+    while True:
+        async with session_factory() as session:
+            repo = SchedulerRepository(session)
+            agents = await repo.list_agents(page=page, page_size=AGENT_PAGE_SIZE)
+        if not agents:
+            return enqueued
+        for agent in agents:
+            if await _maybe_enqueue_agent(session_factory, settings, agent, now):
+                enqueued += 1
+        if len(agents) < AGENT_PAGE_SIZE:
+            return enqueued
+        page += 1
+
+
+async def _scan_chains(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    now: datetime,
+) -> int:
+    enqueued = 0
+    page = 1
+    while True:
+        async with session_factory() as session:
+            repo = SchedulerRepository(session)
+            chains = await repo.list_chains(page=page, page_size=AGENT_PAGE_SIZE)
+        if not chains:
+            return enqueued
+        for chain in chains:
+            if await _maybe_enqueue_chain(session_factory, settings, chain, now):
+                enqueued += 1
+        if len(chains) < AGENT_PAGE_SIZE:
+            return enqueued
+        page += 1
+
+
+async def _maybe_enqueue_agent(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     agent: Agent,
@@ -106,5 +142,51 @@ async def _maybe_enqueue(
         except Exception:
             await scheduler.release_slot(agent.id, slot)
             logger.exception("scheduler enqueue failed agent_id=%s", agent.id)
+            return False
+        return True
+
+
+async def _maybe_enqueue_chain(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    chain: AgentChain,
+    now: datetime,
+) -> bool:
+    try:
+        schedule = ChainSchedule.model_validate(chain.schedule or {})
+    except ValidationError:
+        return False
+    slot = matching_slot(schedule, now, settings.scheduler_timezone)
+    if slot is None:
+        return False
+
+    async with session_factory() as session:
+        scheduler = SchedulerRepository(session)
+        if not await scheduler.try_claim_chain_slot(chain.id, slot):
+            return False
+        try:
+            agents = SqlAlchemyAgentRepository(session)
+            executions = ExecutionService(SqlAlchemyExecutionRepository(session), agents)
+            chains = ChainService(SqlAlchemyChainRepository(session), agents, executions)
+            executions.set_terminal_hook(chains.orchestrator(settings).on_execution_terminal)
+            await chains.enqueue_run(
+                chain.owner_user_sso,
+                chain.id,
+                caller=CurrentUser(user_sso=chain.owner_user_sso),
+                settings=settings,
+                trigger="scheduler",
+            )
+        except AppError as exc:
+            await scheduler.release_chain_slot(chain.id, slot)
+            logger.info(
+                "scheduler skipped chain_id=%s slot=%s: %s",
+                chain.id,
+                slot,
+                exc.message,
+            )
+            return False
+        except Exception:
+            await scheduler.release_chain_slot(chain.id, slot)
+            logger.exception("scheduler enqueue failed chain_id=%s", chain.id)
             return False
         return True

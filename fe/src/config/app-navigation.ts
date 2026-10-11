@@ -1,4 +1,11 @@
-import { Bot, type LucideIcon, ShieldAlert } from "lucide-react";
+import {
+	Bot,
+	GitBranch,
+	type LucideIcon,
+	Plug,
+	ShieldAlert,
+	Webhook,
+} from "lucide-react";
 
 export type AppNavRoute = {
 	id: string;
@@ -11,6 +18,15 @@ export type AppNavRoute = {
 
 export const appNavRoutes: AppNavRoute[] = [
 	{ id: "agents", title: "Agents", to: "/agents", icon: Bot },
+	{ id: "connectors", title: "Connectors", to: "/connectors", icon: Plug },
+	{ id: "chains", title: "Chains", to: "/chains", icon: GitBranch },
+	{
+		id: "webhooks",
+		title: "Webhooks",
+		to: "/webhooks",
+		icon: Webhook,
+		exact: true,
+	},
 	{
 		id: "security",
 		title: "Security",

@@ -20,6 +20,20 @@ class ResizeObserverStub {
 globalThis.ResizeObserver ??=
 	ResizeObserverStub as unknown as typeof ResizeObserver;
 
+// jsdom does not implement pointer capture; Radix Select calls these on open.
+if (typeof Element.prototype.hasPointerCapture !== "function") {
+	Element.prototype.hasPointerCapture = () => false;
+}
+if (typeof Element.prototype.setPointerCapture !== "function") {
+	Element.prototype.setPointerCapture = () => {};
+}
+if (typeof Element.prototype.releasePointerCapture !== "function") {
+	Element.prototype.releasePointerCapture = () => {};
+}
+if (typeof Element.prototype.scrollIntoView !== "function") {
+	Element.prototype.scrollIntoView = () => {};
+}
+
 // shadcn sidebar uses matchMedia for mobile layout.
 Object.defineProperty(window, "matchMedia", {
 	writable: true,

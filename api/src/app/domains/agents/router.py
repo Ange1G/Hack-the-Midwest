@@ -11,7 +11,7 @@ from app.domains.agents.schemas import AgentRead
 from fastapi import status
 
 from app.api.deps import get_connector_repository
-from app.domains.agents.schemas import AgentCreate
+from app.domains.agents.schemas import AgentCreate, AgentUpdate
 from app.domains.connectors.repository import SqlAlchemyConnectorRepository
 
 router = APIRouter()
@@ -54,3 +54,17 @@ async def create_agent(
     connectors: SqlAlchemyConnectorRepository = Depends(get_connector_repository),
 ) -> ApiEnvelope[AgentRead]:
     return await controller.create(user_sso, body, caller=caller, connectors=connectors)
+
+
+@router.patch("/{user_sso}/{agent_id}")
+async def update_agent(
+    user_sso: str,
+    agent_id: uuid.UUID,
+    body: AgentUpdate,
+    controller: AgentsController = Depends(get_agents_controller),
+    caller: CurrentUser = Depends(get_current_user),
+    connectors: SqlAlchemyConnectorRepository = Depends(get_connector_repository),
+) -> ApiEnvelope[AgentRead]:
+    return await controller.update(
+        user_sso, agent_id, body, caller=caller, connectors=connectors
+    )

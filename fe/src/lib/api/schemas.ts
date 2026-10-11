@@ -107,11 +107,28 @@ export const executionResultSchema = z.object({
 });
 export type ExecutionResult = z.infer<typeof executionResultSchema>;
 
+export const MAX_RUN_INPUT_LENGTH = 20_000;
+
+export const executionCreateSchema = z.object({
+	input: z
+		.string()
+		.max(MAX_RUN_INPUT_LENGTH)
+		.nullable()
+		.optional()
+		.transform((value) => {
+			if (value == null) return undefined;
+			const trimmed = value.trim();
+			return trimmed ? trimmed : undefined;
+		}),
+});
+export type ExecutionCreate = z.infer<typeof executionCreateSchema>;
+
 export const executionSchema = z.object({
 	id: z.string(),
 	agent_id: z.string(),
 	owner_user_sso: z.string(),
 	status: executionStatusSchema,
+	input: z.string().nullable().optional().default(null),
 	result: executionResultSchema.nullable(),
 	error_code: z.string().nullable(),
 	error_message: z.string().nullable(),
@@ -135,8 +152,17 @@ export type RunSummary = z.infer<typeof runSummarySchema>;
 
 // Connectors (backend: ConnectorRead)
 
-export const connectorTypeSchema = z.enum(["http", "mcp"]);
+export const connectorTypeSchema = z.enum(["http", "mcp", "database"]);
 export type ConnectorType = z.infer<typeof connectorTypeSchema>;
+
+export const connectorTypeCatalogSchema = z.object({
+	type: z.string(),
+	name: z.string(),
+	description: z.string(),
+	credential_fields: z.array(z.string()),
+	config_schema: z.record(z.string(), z.unknown()),
+});
+export type ConnectorTypeCatalog = z.infer<typeof connectorTypeCatalogSchema>;
 
 export const connectorReferenceSchema = z
 	.object({
@@ -156,32 +182,132 @@ export const connectorSchema = z.object({
 });
 export type Connector = z.infer<typeof connectorSchema>;
 
-export const connectorCreateSchema = z.object({
-	type: z.literal("http"),
+const connectorNameSchema = z
+	.string()
+	.regex(PRIMITIVE_NAME_PATTERN, PRIMITIVE_NAME_MESSAGE);
+
+const publicUrlSchema = z
+	.string()
+	.min(1, "URL is required")
+	.superRefine((value, ctx) => {
+		const reason = unsafeUrlReason(value);
+		if (reason) ctx.addIssue({ code: "custom", message: reason });
+	});
+
+const headerCredentialsSchema = z
+	.object({
+		xApiKey: z.string().optional(),
+		authorizationHeader: z.string().optional(),
+	})
+	.optional();
+
+export const httpConnectorCreateSchema = z
+	.object({
+		type: z.literal("http"),
+		contractVersion: z.literal(CONTRACT_VERSION),
+		name: connectorNameSchema,
+		description: z.string().optional(),
+		config: z.object({
+			method: httpMethodSchema,
+			URL: publicUrlSchema,
+			payload: z.unknown().optional(),
+		}),
+		credentials: headerCredentialsSchema,
+		options: httpOptionsSchema.optional(),
+	})
+	.superRefine((body, ctx) => {
+		if (body.config.method === "GET" && body.config.payload !== undefined) {
+			ctx.addIssue({
+				code: "custom",
+				path: ["config", "payload"],
+				message:
+					"GET requests cannot include a payload; put parameters in the URL",
+			});
+		}
+	});
+
+export const mcpConnectorCreateSchema = z.object({
+	type: z.literal("mcp"),
 	contractVersion: z.literal(CONTRACT_VERSION),
-	name: z
-		.string()
-		.regex(PRIMITIVE_NAME_PATTERN, PRIMITIVE_NAME_MESSAGE),
+	name: connectorNameSchema,
 	description: z.string().optional(),
 	config: z.object({
-		method: httpMethodSchema,
-		URL: z
-			.string()
-			.min(1, "URL is required")
-			.superRefine((value, ctx) => {
-				const reason = unsafeUrlReason(value);
-				if (reason) ctx.addIssue({ code: "custom", message: reason });
-			}),
-		payload: z.unknown().optional(),
+		URL: publicUrlSchema,
 	}),
-	credentials: z
-		.object({
-			xApiKey: z.string().optional(),
-			authorizationHeader: z.string().optional(),
-		})
-		.optional(),
+	credentials: headerCredentialsSchema,
 	options: httpOptionsSchema.optional(),
 });
+
+export const databaseEngineSchema = z.enum([
+	"postgres",
+	"mysql",
+	"mongodb",
+	"redis",
+]);
+
+export const databaseConnectorCreateSchema = z
+	.object({
+		type: z.literal("database"),
+		contractVersion: z.literal(CONTRACT_VERSION),
+		name: connectorNameSchema,
+		description: z.string().optional(),
+		credentials: z
+			.object({
+				username: z.string().optional(),
+				password: z.string().optional(),
+			})
+			.optional(),
+		config: z.discriminatedUnion("mode", [
+			z.object({
+				mode: z.literal("external"),
+				engine: databaseEngineSchema,
+				host: z
+					.string()
+					.min(1, "Host is required")
+					.superRefine((value, ctx) => {
+						const reason = unsafeUrlReason(`https://${value}`);
+						if (reason) ctx.addIssue({ code: "custom", message: reason });
+					}),
+				database: z.string().optional(),
+				access: z.enum(["readOnly", "readWrite"]).optional(),
+			}),
+			z.object({
+				mode: z.literal("provisioned"),
+				engine: databaseEngineSchema,
+				lifecycle: z.enum(["agent", "run"]).optional(),
+			}),
+		]),
+	})
+	.superRefine((body, ctx) => {
+		if (body.config.mode !== "external") return;
+		if (body.config.engine !== "redis" && !body.config.database) {
+			ctx.addIssue({
+				code: "custom",
+				path: ["config", "database"],
+				message: "Database is required",
+			});
+		}
+		if (body.config.engine !== "redis" && !body.credentials?.username) {
+			ctx.addIssue({
+				code: "custom",
+				path: ["credentials", "username"],
+				message: "Username is required",
+			});
+		}
+		if (!body.credentials?.password) {
+			ctx.addIssue({
+				code: "custom",
+				path: ["credentials", "password"],
+				message: "Password is required",
+			});
+		}
+	});
+
+export const connectorCreateSchema = z.discriminatedUnion("type", [
+	httpConnectorCreateSchema,
+	mcpConnectorCreateSchema,
+	databaseConnectorCreateSchema,
+]);
 export type ConnectorCreate = z.infer<typeof connectorCreateSchema>;
 
 // Agents (AgentRead in the backend)
@@ -286,25 +412,34 @@ export const httpContractInputSchema = z
 	});
 export type HttpContractInput = z.infer<typeof httpContractInputSchema>;
 
-// Names are validated here rather than as record keys so the message and the
-// issue path (the offending name) are ours.
+const MCP_TOOL_NAME = /^[A-Za-z0-9_.-]{1,128}$/;
+const MAX_ALLOWED_TOOLS = 100;
+
+export const connectorReferenceInputSchema = z.object({
+	allowedTools: z
+		.array(
+			z
+				.string()
+				.regex(
+					MCP_TOOL_NAME,
+					"Tool names are letters, digits, underscores, dots and hyphens",
+				),
+		)
+		.min(1, "List at least one tool")
+		.max(MAX_ALLOWED_TOOLS, `At most ${MAX_ALLOWED_TOOLS} tools`)
+		.optional(),
+});
+export type ConnectorReferenceInput = z.infer<
+	typeof connectorReferenceInputSchema
+>;
+
 const primitivesInputSchema = z
-	.record(z.string(), httpContractInputSchema)
+	.record(z.string().min(1), connectorReferenceInputSchema)
 	.superRefine((primitives, ctx) => {
-		const names = Object.keys(primitives);
-		for (const name of names) {
-			if (!PRIMITIVE_NAME_PATTERN.test(name)) {
-				ctx.addIssue({
-					code: "custom",
-					path: [name],
-					message: PRIMITIVE_NAME_MESSAGE,
-				});
-			}
-		}
-		if (names.length > MAX_PRIMITIVES_PER_AGENT) {
+		if (Object.keys(primitives).length > MAX_PRIMITIVES_PER_AGENT) {
 			ctx.addIssue({
 				code: "custom",
-				message: `At most ${MAX_PRIMITIVES_PER_AGENT} HTTP calls per agent`,
+				message: `At most ${MAX_PRIMITIVES_PER_AGENT} connectors per agent`,
 			});
 		}
 	});
@@ -354,6 +489,21 @@ export const agentInputSchema = z.object({
 });
 export type AgentInput = z.infer<typeof agentInputSchema>;
 
+export const agentUpdateSchema = z
+	.object({
+		agentTitle: agentInputSchema.shape.agentTitle.optional(),
+		systemPrompt: agentInputSchema.shape.systemPrompt.optional(),
+		configurations: agentInputSchema.shape.configurations.optional(),
+	})
+	.refine(
+		(value) =>
+			value.agentTitle !== undefined ||
+			value.systemPrompt !== undefined ||
+			value.configurations !== undefined,
+		{ message: "Provide at least one field to update" },
+	);
+export type AgentUpdate = z.infer<typeof agentUpdateSchema>;
+
 export const runEventSchema = z.object({
 	id: z.string(),
 	run_id: z.string(),
@@ -363,6 +513,130 @@ export const runEventSchema = z.object({
 	data: z.record(z.string(), z.unknown()).nullable(),
 });
 export type RunEvent = z.infer<typeof runEventSchema>;
+
+export const webhookSchema = z.object({
+	id: z.string(),
+	owner_user_sso: z.string(),
+	target_type: z.enum(["agent", "chain"]).default("agent"),
+	target_agent_id: z.string().nullable().optional(),
+	target_chain_id: z.string().nullable().optional(),
+	secret: z.string(),
+	disabled: z.boolean(),
+	created_at: z.string(),
+});
+export type Webhook = z.infer<typeof webhookSchema>;
+
+export const webhookCreateSchema = z
+	.object({
+		target_type: z.enum(["agent", "chain"]).default("agent"),
+		target_agent_id: z.string().optional(),
+		target_chain_id: z.string().optional(),
+	})
+	.superRefine((value, ctx) => {
+		if (value.target_type === "chain") {
+			if (!value.target_chain_id) {
+				ctx.addIssue({
+					code: "custom",
+					path: ["target_chain_id"],
+					message: "Choose a chain",
+				});
+			}
+		} else if (!value.target_agent_id) {
+			ctx.addIssue({
+				code: "custom",
+				path: ["target_agent_id"],
+				message: "Choose an agent",
+			});
+		}
+	});
+export type WebhookCreate = z.input<typeof webhookCreateSchema>;
+
+export const chainScheduleSchema = z.object({
+	month: z.number().int().min(1).max(12).nullable().optional(),
+	dayOfWeek: z.array(z.number().int().min(0).max(6)).max(7).optional(),
+	timeOfDay: z.array(z.number().int().min(0).max(1439)).max(48).optional(),
+});
+export type ChainSchedule = z.infer<typeof chainScheduleSchema>;
+
+export const chainStepReadSchema = z.object({
+	position: z.number().int().min(0),
+	agent_id: z.string(),
+	label: z.string().nullable().optional(),
+});
+export type ChainStepRead = z.infer<typeof chainStepReadSchema>;
+
+export const chainSchema = z.object({
+	id: z.string(),
+	owner_user_sso: z.string(),
+	title: z.string(),
+	schedule: chainScheduleSchema.nullable().optional(),
+	steps: z.array(chainStepReadSchema),
+	created_at: z.string(),
+	updated_at: z.string(),
+});
+export type Chain = z.infer<typeof chainSchema>;
+
+export const chainStepCreateSchema = z.object({
+	agent_id: z.string().min(1, "Choose an agent"),
+	label: z.string().trim().max(64).optional(),
+});
+export type ChainStepCreate = z.infer<typeof chainStepCreateSchema>;
+
+export const chainCreateSchema = z.object({
+	title: z
+		.string()
+		.trim()
+		.min(1, "Name is required")
+		.max(255, "Keep the name under 255 characters"),
+	steps: z
+		.array(chainStepCreateSchema)
+		.min(1, "Add at least one step")
+		.max(20, "A chain may have at most 20 steps"),
+	schedule: chainScheduleSchema.nullable().optional(),
+});
+export type ChainCreate = z.infer<typeof chainCreateSchema>;
+
+export const chainRunStatusSchema = z.enum(["running", "succeeded", "failed"]);
+export type ChainRunStatus = z.infer<typeof chainRunStatusSchema>;
+
+export const chainRunSchema = z.object({
+	id: z.string(),
+	chain_id: z.string(),
+	owner_user_sso: z.string(),
+	status: chainRunStatusSchema,
+	input: z.string().nullable().optional(),
+	trigger: z.string(),
+	final_result: executionResultSchema.nullable().optional(),
+	error_code: z.string().nullable().optional(),
+	error_message: z.string().nullable().optional(),
+	started_at: z.string(),
+	finished_at: z.string().nullable().optional(),
+	created_at: z.string(),
+	updated_at: z.string(),
+});
+export type ChainRun = z.infer<typeof chainRunSchema>;
+
+export const chainRunStepStatusSchema = z.enum([
+	"pending",
+	"queued",
+	"succeeded",
+	"failed",
+	"skipped",
+]);
+export type ChainRunStepStatus = z.infer<typeof chainRunStepStatusSchema>;
+
+export const chainRunStepSchema = z.object({
+	position: z.number().int().min(0),
+	agent_id: z.string(),
+	label: z.string().nullable().optional(),
+	status: chainRunStepStatusSchema,
+	execution_id: z.string().nullable().optional(),
+	input: z.string().nullable().optional(),
+	result: executionResultSchema.nullable().optional(),
+	error_code: z.string().nullable().optional(),
+	error_message: z.string().nullable().optional(),
+});
+export type ChainRunStep = z.infer<typeof chainRunStepSchema>;
 
 export const findingSchema = z.object({
 	id: z.string(),
@@ -414,11 +688,30 @@ export function httpContractFromConnector(
 	};
 }
 
+export function connectorConfigRecord(
+	connector: Connector,
+): Record<string, unknown> {
+	const config = connector.contract.config;
+	return config && typeof config === "object"
+		? (config as Record<string, unknown>)
+		: {};
+}
+
+export function connectorLabel(type: string): string {
+	if (type === "http") return "HTTP";
+	if (type === "mcp") return "MCP";
+	if (type === "database") return "Database";
+	return type;
+}
+
 export function connectorCreateFromHttpCall(
 	name: string,
 	contract: HttpContractInput,
-): ConnectorCreate {
-	const credentials: ConnectorCreate["credentials"] = {};
+): z.infer<typeof httpConnectorCreateSchema> {
+	const credentials: {
+		xApiKey?: string;
+		authorizationHeader?: string;
+	} = {};
 	if (contract.xApiKey) credentials.xApiKey = contract.xApiKey;
 	if (contract.authorizationHeader) {
 		credentials.authorizationHeader = contract.authorizationHeader;

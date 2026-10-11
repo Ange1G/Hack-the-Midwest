@@ -146,6 +146,10 @@ curl -s -X POST -H "X-Dev-User-SSO: sso-user-a" -H "Content-Type: application/js
 `dayOfWeek`: 0 = Sunday ... 6 = Saturday. `timeOfDay`: minutes after midnight (540 = 09:00).
 A connector that does not exist or belongs to another user is rejected with the same `422`.
 
+`PATCH /api/v1/agents/{user_sso}/{agent_id}` accepts any of `agentTitle`, `systemPrompt`,
+and `configurations` (at least one required). When `configurations` is sent it fully
+replaces the stored object; the same connector-reference rules apply as on create.
+
 Adding a connector type: subclass `BaseContract` in `app/domains/primitives/` and add a
 `ConnectorType` to `registry.CONNECTORS`. Rules and rationale: `spec/2026-10-10-connectors/`.
 
@@ -189,9 +193,10 @@ container is started. The key must not appear in agent configuration or callback
 5. Scheduler (optional, from `api/`): `uv run agent-scheduler`
 
 The scheduler is a separate process. It reads each agent's `configurations.dayOfWeek`
-and `timeOfDay` in `SCHEDULER_TIMEZONE` (default UTC; `0` = Sunday) and enqueues a run
-at most once per agent per slot (`YYYY-MM-DD:mmmm`). Empty `timeOfDay` means the agent
-is not scheduled. Poll interval is `SCHEDULER_POLL_INTERVAL_SECONDS` (default 15).
+and `timeOfDay`, and each chain's `schedule` with the same fields, in
+`SCHEDULER_TIMEZONE` (default UTC; `0` = Sunday). It enqueues at most once per
+agent or chain per slot (`YYYY-MM-DD:mmmm`). Empty `timeOfDay` means not scheduled.
+Poll interval is `SCHEDULER_POLL_INTERVAL_SECONDS` (default 15).
 
 ## Webhook triggers
 
@@ -202,7 +207,8 @@ usual `X-Dev-User-SSO`. The fire route uses HMAC only — no SSO, no user id in 
 # Returns the plaintext secret once. List/get mask it as "********".
 curl -s -X POST -H "X-Dev-User-SSO: sso-user-a" -H "Content-Type: application/json" \
   "http://localhost:8000/api/v1/webhooks/sso-user-a" \
-  -d '{"target_agent_id":"<agent-id>"}'
+  -d '{"target_type":"agent","target_agent_id":"<agent-id>"}'
+# Chain: {"target_type":"chain","target_chain_id":"<chain-id>"}
 
 # Integrator call. Sign the raw body with HMAC-SHA256.
 # Header: X-Webhook-Signature: sha256=<hex>  (bare hex is also accepted)
@@ -214,12 +220,54 @@ curl -s -X POST "http://localhost:8000/api/v1/hooks/<webhook-id>" \
   -d "$BODY"
 ```
 
-A valid fire returns `202` and a queued `execution_id`. The body is stored as per-run
+A valid fire returns `202`. Agent webhooks return a queued execution; chain webhooks
+return a running chain run (`trigger=webhook`). The body is stored as per-run
 `input`: compact JSON when the body is JSON, otherwise the UTF-8 text. Invalid
-signature is `401` and creates no execution. A deleted target agent (or deleted
-webhook) is `404`. Max body is `WEBHOOK_MAX_BODY_BYTES` (default 20,000). Each
-webhook is limited to `WEBHOOK_RATE_LIMIT_PER_MINUTE` fires (default 30; in-memory
-per API process). Creating a webhook requires `SECRETS_ENCRYPTION_KEY`.
+signature is `401` and creates no row. A deleted target (or deleted webhook) is
+`404`. Max body is `WEBHOOK_MAX_BODY_BYTES` (default 20,000). Each webhook is
+limited to `WEBHOOK_RATE_LIMIT_PER_MINUTE` fires (default 30; in-memory per API
+process). Creating a webhook requires `SECRETS_ENCRYPTION_KEY`.
+
+## Agent chains
+
+A chain is an ordered list of the owner's agents. Running a chain enqueues step 0,
+then each successful callback hands `result.output` to the next step. A failed step
+fails the chain and later steps are never queued.
+
+```bash
+curl -s -X POST -H "X-Dev-User-SSO: sso-user-a" -H "Content-Type: application/json" \
+  "http://localhost:8000/api/v1/chains/sso-user-a" \
+  -d '{
+    "title": "Triage",
+    "steps": [
+      {"agent_id": "<agent-a>", "label": "summarize"},
+      {"agent_id": "<agent-b>"}
+    ],
+    "schedule": {"dayOfWeek": [1], "timeOfDay": [540]}
+  }'
+```
+
+Array order is run order (`position` 0, 1, …). Every `agent_id` must belong to the
+caller; missing or foreign IDs return `422` with the same "Agent not found" message.
+`MAX_CHAIN_STEPS` (default 10) caps length. `schedule` uses the same `dayOfWeek` /
+`timeOfDay` / `month` shape as agents and is fired by `agent-scheduler`.
+
+List: `GET /api/v1/chains/{sso}`. Get: `GET /api/v1/chains/{sso}/{chain-id}`.
+Delete: `DELETE /api/v1/chains/{sso}/{chain-id}`.
+
+Start a run (optional `{ "input" }` becomes step 0's user message):
+
+```bash
+curl -s -X POST -H "X-Dev-User-SSO: sso-user-a" -H "Content-Type: application/json" \
+  "http://localhost:8000/api/v1/chains/sso-user-a/<chain-id>/runs" \
+  -d '{"input": "ticket INC-1"}'
+```
+
+Poll `GET /api/v1/chains/{sso}/runs/{run-id}` for `status` and `final_result` only.
+The process log is `GET /api/v1/chains/{sso}/runs/{run-id}/steps` (order `[0,1,…]`).
+Handoff text is `Previous step output:\\n` plus the prior `result.output`, truncated
+to `MAX_CHAIN_HANDOFF_BYTES` (default 20,000). Webhooks may target a chain with
+`target_type: chain`.
 
 The container must reach the API at `EXECUTION_CALLBACK_BASE_URL`
 (default `http://host.docker.internal:8000`). The worker always passes

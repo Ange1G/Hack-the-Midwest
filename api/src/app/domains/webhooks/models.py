@@ -9,7 +9,7 @@ from app.core.database import Base
 
 
 class Webhook(Base):
-    """Owner-configured HMAC trigger that enqueues an execution for one agent."""
+    """Owner-configured HMAC trigger that starts an agent or a chain."""
 
     __tablename__ = "webhooks"
     __table_args__ = (Index("ix_webhooks_owner_created", "owner_user_sso", "created_at"),)
@@ -20,10 +20,16 @@ class Webhook(Base):
         server_default=func.gen_random_uuid(),
     )
     owner_user_sso: Mapped[str] = mapped_column(String(255), nullable=False)
-    target_agent_id: Mapped[uuid.UUID] = mapped_column(
+    target_type: Mapped[str] = mapped_column(String(16), nullable=False, server_default="agent")
+    target_agent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("agents.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
+    )
+    target_chain_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_chains.id", ondelete="CASCADE"),
+        nullable=True,
     )
     secret_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
     disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")

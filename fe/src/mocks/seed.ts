@@ -1,5 +1,11 @@
 import { DEMO_USER_SSO } from "./demo-account";
-import { createAgent, createRun, runToCompletion } from "./state";
+import {
+	createAgent,
+	createChain,
+	createRun,
+	createWebhook,
+	runToCompletion,
+} from "./state";
 
 // Demo data for mock mode so every screen has something to show. Sign in with
 // any other SSO id to see the empty states.
@@ -23,7 +29,7 @@ export function seedDemoState(): void {
 	});
 	runToCompletion(createRun(uptime));
 
-	createAgent(DEMO_USER_SSO, {
+	const triage = createAgent(DEMO_USER_SSO, {
 		agentTitle: "DevRev ticket triage",
 		systemPrompt:
 			"Read new support tickets from DevRev, label them by urgency, and draft a first reply for the critical ones.",
@@ -60,4 +66,13 @@ export function seedDemoState(): void {
 		},
 	});
 	runToCompletion(createRun(rogue));
+
+	createWebhook(DEMO_USER_SSO, uptime.id);
+	createChain(DEMO_USER_SSO, {
+		title: "Triage then summarize",
+		steps: [
+			{ agent_id: triage.id, label: "Triage" },
+			{ agent_id: uptime.id, label: "Summarize" },
+		],
+	});
 }

@@ -4,22 +4,36 @@ import {
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
-import { ApiError, api, DEV_USER_HEADER } from "./client";
+import { z } from "zod";
+import { API_BASE_URL, ApiError, api, DEV_USER_HEADER } from "./client";
 import {
 	type Agent,
 	type AgentInput,
+	type AgentUpdate,
 	agentSchema,
+	type Chain,
+	type ChainCreate,
+	type ChainRun,
+	type ChainRunStatus,
 	type Connector,
 	type ConnectorCreate,
-	connectorCreateFromHttpCall,
+	chainRunSchema,
+	chainRunStepSchema,
+	chainSchema,
 	connectorSchema,
+	connectorTypeCatalogSchema,
+	type ExecutionCreate,
+	executionCreateSchema,
 	executionSchema,
-	type Pagination,
 	type Finding,
+	type Pagination,
 	type Run,
 	type RunStatus,
 	type SignInInput,
 	signInInputSchema,
+	type Webhook,
+	type WebhookCreate,
+	webhookSchema,
 } from "./schemas";
 import {
 	clearSessionUser,
@@ -41,14 +55,25 @@ export const queryKeys = {
 	agents: ["agents"] as const,
 	agent: (id: string) => ["agents", id] as const,
 	connectors: ["connectors"] as const,
+	connectorTypes: ["connector-types"] as const,
 	executions: ["executions"] as const,
 	agentRuns: (id: string) => ["agents", id, "runs"] as const,
 	run: (id: string) => ["runs", id] as const,
 	findings: (filter: FindingsFilter) => ["findings", filter] as const,
+	webhooks: ["webhooks"] as const,
+	chains: ["chains"] as const,
+	chain: (id: string) => ["chains", id] as const,
+	chainRuns: (chainId: string) => ["chains", chainId, "runs"] as const,
+	chainRun: (id: string) => ["chain-runs", id] as const,
+	chainRunSteps: (runId: string) => ["chain-runs", runId, "steps"] as const,
 };
 
 export function isActiveRunStatus(status: RunStatus): boolean {
 	return status === "queued" || status === "running";
+}
+
+export function isActiveChainRunStatus(status: ChainRunStatus): boolean {
+	return status === "running";
 }
 
 function requireUser(): User {
@@ -69,6 +94,18 @@ function connectorsPath(user_sso: string): string {
 
 function executionsPath(user_sso: string): string {
 	return `${agentsPath(user_sso)}/executions`;
+}
+
+function webhooksPath(user_sso: string): string {
+	return `/webhooks/${encodeURIComponent(user_sso)}`;
+}
+
+function chainsPath(user_sso: string): string {
+	return `/chains/${encodeURIComponent(user_sso)}`;
+}
+
+export function webhookFireUrl(webhookId: string): string {
+	return `${API_BASE_URL}/hooks/${encodeURIComponent(webhookId)}`;
 }
 
 // Session
@@ -152,57 +189,33 @@ export function useAgent(id: string) {
 	return useQuery(agentQueryOptions(id));
 }
 
-async function createConnectorsForAgent(
-	user_sso: string,
-	input: AgentInput,
-): Promise<Record<string, Record<string, never>>> {
-	const primitives: Record<string, Record<string, never>> = {};
-	for (const [name, contract] of Object.entries(
-		input.configurations.primitives,
-	)) {
-		const body = connectorCreateFromHttpCall(name, contract);
-		const connector = await createConnectorWithUniqueName(user_sso, body);
-		primitives[connector.id] = {};
-	}
-	return primitives;
-}
-
-async function createConnectorWithUniqueName(
-	user_sso: string,
-	body: ConnectorCreate,
-): Promise<Connector> {
-	try {
-		return await api.post(connectorsPath(user_sso), connectorSchema, body);
-	} catch (error) {
-		if (error instanceof ApiError && error.status === 409) {
-			const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 8);
-			return api.post(connectorsPath(user_sso), connectorSchema, {
-				...body,
-				name: `${body.name}_${suffix}`.slice(0, 64),
-			});
-		}
-		throw error;
-	}
-}
-
 export function useCreateAgent() {
 	const queryClient = useQueryClient();
 	return useMutation({
 		mutationFn: async (input: AgentInput) => {
 			const user = requireUser();
-			const primitives = await createConnectorsForAgent(user.user_sso, input);
-			return api.post(agentsPath(user.user_sso), agentSchema, {
-				...input,
-				configurations: {
-					...input.configurations,
-					primitives,
-				},
-			});
+			return api.post(agentsPath(user.user_sso), agentSchema, input);
 		},
 		onSuccess: (agent: Agent) => {
 			queryClient.setQueryData(queryKeys.agent(agent.id), agent);
 			void queryClient.invalidateQueries({ queryKey: queryKeys.agents });
-			void queryClient.invalidateQueries({ queryKey: queryKeys.connectors });
+		},
+	});
+}
+
+export function useUpdateAgent() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async ({
+			id,
+			...body
+		}: AgentUpdate & { id: string }): Promise<Agent> => {
+			const user = requireUser();
+			return api.patch(`${agentsPath(user.user_sso)}/${id}`, agentSchema, body);
+		},
+		onSuccess: (agent: Agent) => {
+			queryClient.setQueryData(queryKeys.agent(agent.id), agent);
+			void queryClient.invalidateQueries({ queryKey: queryKeys.agents });
 		},
 	});
 }
@@ -228,17 +241,44 @@ export function useConnectors() {
 	return useQuery(connectorsQueryOptions());
 }
 
+export async function createConnectorRecord(
+	body: ConnectorCreate,
+): Promise<Connector> {
+	const user = requireUser();
+	try {
+		return await api.post(connectorsPath(user.user_sso), connectorSchema, body);
+	} catch (error) {
+		if (error instanceof ApiError && error.status === 409) {
+			const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 8);
+			return api.post(connectorsPath(user.user_sso), connectorSchema, {
+				...body,
+				name: `${body.name}_${suffix}`.slice(0, 64),
+			});
+		}
+		throw error;
+	}
+}
+
 export function useCreateConnector() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: (body: ConnectorCreate) => {
-			const user = requireUser();
-			return api.post(connectorsPath(user.user_sso), connectorSchema, body);
-		},
+		mutationFn: (body: ConnectorCreate) => createConnectorRecord(body),
 		onSuccess: () => {
 			void queryClient.invalidateQueries({ queryKey: queryKeys.connectors });
 		},
 	});
+}
+
+export function connectorTypesQueryOptions() {
+	return queryOptions({
+		queryKey: queryKeys.connectorTypes,
+		queryFn: () =>
+			api.get("/connector-types", z.array(connectorTypeCatalogSchema)),
+	});
+}
+
+export function useConnectorTypes() {
+	return useQuery(connectorTypesQueryOptions());
 }
 
 // Executions
@@ -280,18 +320,33 @@ export function useAgentRuns(agentId: string) {
 	return useQuery(agentRunsQueryOptions(agentId));
 }
 
+export type StartRunVariables = string | { agentId?: string; input?: string };
+
+function resolveStartRun(
+	hookAgentId: string | undefined,
+	variables: StartRunVariables | undefined,
+): { agentId: string; body: ExecutionCreate | undefined } {
+	if (typeof variables === "string") {
+		return { agentId: variables, body: undefined };
+	}
+	const id = variables?.agentId ?? hookAgentId;
+	if (!id) {
+		throw new ApiError(400, "invalid_request", "Agent id is required");
+	}
+	const parsed = executionCreateSchema.parse({ input: variables?.input });
+	return { agentId: id, body: parsed.input ? parsed : undefined };
+}
+
 export function useStartRun(agentId?: string) {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: (explicitId?: string) => {
-			const id = explicitId ?? agentId;
-			if (!id) {
-				throw new ApiError(400, "invalid_request", "Agent id is required");
-			}
+		mutationFn: (variables?: StartRunVariables) => {
+			const { agentId: id, body } = resolveStartRun(agentId, variables);
 			const user = requireUser();
 			return api.post(
 				`${agentsPath(user.user_sso)}/${id}/executions`,
 				executionSchema,
+				body,
 			);
 		},
 		onSuccess: (run: Run) => {
@@ -373,4 +428,183 @@ export function findingsQueryOptions(filter: FindingsFilter = {}) {
 
 export function useFindings(filter: FindingsFilter = {}) {
 	return useQuery(findingsQueryOptions(filter));
+}
+
+// Webhooks
+
+export function webhooksQueryOptions() {
+	return queryOptions({
+		queryKey: queryKeys.webhooks,
+		queryFn: () => {
+			const user = requireUser();
+			return api.list(
+				`${webhooksPath(user.user_sso)}?page=1&page_size=${LIST_PAGE_SIZE}`,
+				webhookSchema,
+			);
+		},
+	});
+}
+
+export function useWebhooks() {
+	return useQuery(webhooksQueryOptions());
+}
+
+export function useCreateWebhook() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (body: WebhookCreate) => {
+			const user = requireUser();
+			return api.post(webhooksPath(user.user_sso), webhookSchema, body);
+		},
+		onSuccess: (webhook: Webhook) => {
+			void queryClient.invalidateQueries({ queryKey: queryKeys.webhooks });
+			return webhook;
+		},
+	});
+}
+
+export function useDeleteWebhook() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (webhookId: string) => {
+			const user = requireUser();
+			return api.delete(`${webhooksPath(user.user_sso)}/${webhookId}`);
+		},
+		onSuccess: () => {
+			void queryClient.invalidateQueries({ queryKey: queryKeys.webhooks });
+		},
+	});
+}
+
+// Chains
+
+export function chainsQueryOptions() {
+	return queryOptions({
+		queryKey: queryKeys.chains,
+		queryFn: () => {
+			const user = requireUser();
+			return api.list(
+				`${chainsPath(user.user_sso)}?page=1&page_size=${LIST_PAGE_SIZE}`,
+				chainSchema,
+			);
+		},
+	});
+}
+
+export function useChains() {
+	return useQuery(chainsQueryOptions());
+}
+
+export function chainQueryOptions(id: string) {
+	return queryOptions({
+		queryKey: queryKeys.chain(id),
+		queryFn: () => {
+			const user = requireUser();
+			return api.get(`${chainsPath(user.user_sso)}/${id}`, chainSchema);
+		},
+	});
+}
+
+export function useChain(id: string) {
+	return useQuery(chainQueryOptions(id));
+}
+
+export function useCreateChain() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (body: ChainCreate) => {
+			const user = requireUser();
+			return api.post(chainsPath(user.user_sso), chainSchema, body);
+		},
+		onSuccess: (chain: Chain) => {
+			queryClient.setQueryData(queryKeys.chain(chain.id), chain);
+			void queryClient.invalidateQueries({ queryKey: queryKeys.chains });
+		},
+	});
+}
+
+export function useDeleteChain() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (chainId: string) => {
+			const user = requireUser();
+			return api.delete(`${chainsPath(user.user_sso)}/${chainId}`);
+		},
+		onSuccess: () => {
+			void queryClient.invalidateQueries({ queryKey: queryKeys.chains });
+		},
+	});
+}
+
+export function useStartChainRun(chainId?: string) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (variables?: { chainId?: string; input?: string }) => {
+			const id = variables?.chainId ?? chainId;
+			if (!id) {
+				throw new ApiError(400, "invalid_request", "Chain id is required");
+			}
+			const user = requireUser();
+			const parsed = executionCreateSchema.parse({ input: variables?.input });
+			return api.post(
+				`${chainsPath(user.user_sso)}/${id}/runs`,
+				chainRunSchema,
+				parsed.input ? parsed : undefined,
+			);
+		},
+		onSuccess: (run: ChainRun) => {
+			queryClient.setQueryData(queryKeys.chainRun(run.id), run);
+			queryClient.setQueryData<ChainRun[]>(
+				queryKeys.chainRuns(run.chain_id),
+				(current) => [
+					run,
+					...(current ?? []).filter((item) => item.id !== run.id),
+				],
+			);
+		},
+	});
+}
+
+export function chainRunQueryOptions(
+	runId: string,
+	{ pollIntervalMs = ACTIVE_RUN_POLL_MS }: PollOptions = {},
+) {
+	return queryOptions({
+		queryKey: queryKeys.chainRun(runId),
+		queryFn: () => {
+			const user = requireUser();
+			return api.get(
+				`${chainsPath(user.user_sso)}/runs/${runId}`,
+				chainRunSchema,
+			);
+		},
+		refetchInterval: (query) => {
+			const status = query.state.data?.status;
+			return status && isActiveChainRunStatus(status) ? pollIntervalMs : false;
+		},
+	});
+}
+
+export function useChainRun(runId: string, options?: PollOptions) {
+	return useQuery(chainRunQueryOptions(runId, options));
+}
+
+export function chainRunStepsQueryOptions(runId: string) {
+	return queryOptions({
+		queryKey: queryKeys.chainRunSteps(runId),
+		queryFn: () => {
+			const user = requireUser();
+			return api.get(
+				`${chainsPath(user.user_sso)}/runs/${runId}/steps`,
+				z.array(chainRunStepSchema),
+			);
+		},
+	});
+}
+
+export function useChainRunSteps(runId: string, enabled = true) {
+	return useQuery({
+		...chainRunStepsQueryOptions(runId),
+		enabled,
+	});
 }

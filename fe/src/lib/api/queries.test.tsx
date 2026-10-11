@@ -2,23 +2,38 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { server } from "#/mocks/server";
+import type { HttpAgentSeed } from "#/test/fixtures";
 import { rogueAgentInput, safeAgentInput } from "#/test/fixtures";
 import { createQueryWrapper } from "#/test/query";
 import { signInAs } from "#/test/session";
 import { API_BASE_URL, api } from "./client";
 import {
+	isActiveChainRunStatus,
 	isActiveRunStatus,
 	useAgent,
 	useAgents,
+	useChain,
+	useChainRun,
+	useChains,
 	useCreateAgent,
-	useConnectors,
+	useCreateChain,
+	useCreateConnector,
+	useCreateWebhook,
 	useMe,
 	useRun,
 	useSignIn,
 	useSignOut,
+	useStartChainRun,
 	useStartRun,
+	useWebhooks,
+	webhookFireUrl,
 } from "./queries";
-import { type AgentInput, agentSchema, type RunStatus } from "./schemas";
+import {
+	type AgentInput,
+	agentSchema,
+	connectorCreateFromHttpCall,
+	type RunStatus,
+} from "./schemas";
 import { getSessionUser } from "./session";
 
 type Wrapper = ReturnType<typeof createQueryWrapper>;
@@ -28,9 +43,34 @@ async function signIn(wrapper: Wrapper, user_sso = "angel") {
 	return act(() => result.current.mutateAsync({ user_sso }));
 }
 
-async function createAgent(wrapper: Wrapper, input: AgentInput) {
+async function createAgent(wrapper: Wrapper, seed: HttpAgentSeed) {
+	const connectors = renderHook(() => useCreateConnector(), { wrapper });
+	const primitives: AgentInput["configurations"]["primitives"] = {};
+	for (const [name, contract] of Object.entries(
+		seed.configurations.primitives,
+	)) {
+		const connector = await act(() =>
+			connectors.result.current.mutateAsync(
+				connectorCreateFromHttpCall(name, contract),
+			),
+		);
+		primitives[connector.id] = {};
+	}
 	const { result } = renderHook(() => useCreateAgent(), { wrapper });
-	return act(() => result.current.mutateAsync(input));
+	return act(() =>
+		result.current.mutateAsync({
+			agentTitle: seed.agentTitle,
+			systemPrompt: seed.systemPrompt,
+			configurations: {
+				primitives,
+				...(seed.configurations.month != null
+					? { month: seed.configurations.month }
+					: {}),
+				dayOfWeek: seed.configurations.dayOfWeek,
+				timeOfDay: seed.configurations.timeOfDay,
+			},
+		}),
+	);
 }
 
 async function startRun(wrapper: Wrapper, agentId: string) {
@@ -45,6 +85,14 @@ describe("isActiveRunStatus", () => {
 		expect(isActiveRunStatus("succeeded")).toBe(false);
 		expect(isActiveRunStatus("failed")).toBe(false);
 		expect(isActiveRunStatus("timed_out")).toBe(false);
+	});
+});
+
+describe("isActiveChainRunStatus", () => {
+	it("is true only while a chain run is running", () => {
+		expect(isActiveChainRunStatus("running")).toBe(true);
+		expect(isActiveChainRunStatus("succeeded")).toBe(false);
+		expect(isActiveChainRunStatus("failed")).toBe(false);
 	});
 });
 
@@ -140,54 +188,40 @@ describe("agent hooks", () => {
 		await waitFor(() => expect(byId.result.current.data?.id).toBe(created.id));
 	});
 
-	it("masks credentials in the created agent, like the backend does", async () => {
+	it("masks credentials on the created connector, like the backend does", async () => {
 		const wrapper = createQueryWrapper();
 		await signIn(wrapper);
-		const created = await createAgent(wrapper, {
-			...safeAgentInput,
-			configurations: {
-				...safeAgentInput.configurations,
-				primitives: {
-					status: {
-						...safeAgentInput.configurations.primitives.status,
-						xApiKey: "key-live-123",
-						authorizationHeader: "Bearer tok-456",
-					},
-				},
-			},
-		});
-		const connectors = renderHook(() => useConnectors(), { wrapper });
-		await waitFor(() =>
-			expect(connectors.result.current.data?.length).toBeGreaterThan(0),
+		const create = renderHook(() => useCreateConnector(), { wrapper });
+		const connector = await act(() =>
+			create.result.current.mutateAsync(
+				connectorCreateFromHttpCall("status", {
+					...safeAgentInput.configurations.primitives.status,
+					xApiKey: "key-live-123",
+					authorizationHeader: "Bearer tok-456",
+				}),
+			),
 		);
-		const stored = connectors.result.current.data?.[0]?.contract as {
+		const stored = connector.contract as {
 			credentials?: { xApiKey?: string; authorizationHeader?: string };
 		};
-		expect(stored?.credentials?.xApiKey).toBe("********");
-		expect(stored?.credentials?.authorizationHeader).toBe("********");
-		expect(JSON.stringify(created)).not.toContain("key-live-123");
-		expect(JSON.stringify(connectors.result.current.data)).not.toContain(
-			"key-live-123",
-		);
+		expect(stored.credentials?.xApiKey).toBe("********");
+		expect(stored.credentials?.authorizationHeader).toBe("********");
+		expect(JSON.stringify(connector)).not.toContain("key-live-123");
 	});
 
-	it("rejects an unsafe URL with the backend's error shape", async () => {
+	it("rejects an unsafe connector URL with the backend's error shape", async () => {
 		const wrapper = createQueryWrapper();
 		await signIn(wrapper);
-		const { result } = renderHook(() => useCreateAgent(), { wrapper });
+		const { result } = renderHook(() => useCreateConnector(), { wrapper });
 		await act(async () => {
 			await result.current
 				.mutateAsync({
-					...safeAgentInput,
-					configurations: {
-						...safeAgentInput.configurations,
-						primitives: {
-							scrape: {
-								contractVersion: 1,
-								method: "GET",
-								URL: "http://169.254.169.254/latest/meta-data/",
-							},
-						},
+					type: "http",
+					contractVersion: 1,
+					name: "scrape",
+					config: {
+						method: "GET",
+						URL: "http://169.254.169.254/latest/meta-data/",
 					},
 				})
 				.catch(() => undefined);
@@ -275,5 +309,93 @@ describe("run hooks", () => {
 
 		const detail = renderHook(() => useAgent(agent.id), { wrapper });
 		await waitFor(() => expect(detail.result.current.data?.flagged).toBe(true));
+	});
+
+	it("starts a run with optional input", async () => {
+		const wrapper = createQueryWrapper();
+		await signIn(wrapper);
+		const agent = await createAgent(wrapper, safeAgentInput);
+		const { result } = renderHook(() => useStartRun(agent.id), { wrapper });
+		const run = await act(() =>
+			result.current.mutateAsync({ input: "  ticket INC-1  " }),
+		);
+		expect(run.input).toBe("ticket INC-1");
+	});
+});
+
+describe("webhook hooks", () => {
+	it("creates a webhook, lists it masked, and builds the public fire URL", async () => {
+		const wrapper = createQueryWrapper();
+		await signIn(wrapper);
+		const agent = await createAgent(wrapper, safeAgentInput);
+
+		const created = renderHook(() => useCreateWebhook(), { wrapper });
+		const webhook = await act(() =>
+			created.result.current.mutateAsync({ target_agent_id: agent.id }),
+		);
+		expect(webhook.secret).toMatch(/^whsec_/);
+		expect(webhookFireUrl(webhook.id)).toBe(
+			`${API_BASE_URL}/hooks/${webhook.id}`,
+		);
+
+		const list = renderHook(() => useWebhooks(), { wrapper });
+		await waitFor(() =>
+			expect(list.result.current.data?.items).toHaveLength(1),
+		);
+		expect(list.result.current.data?.items[0]?.secret).toBe("********");
+	});
+});
+
+describe("chain hooks", () => {
+	it("creates a chain and polls a run through to the final result", async () => {
+		const wrapper = createQueryWrapper();
+		await signIn(wrapper);
+		const first = await createAgent(wrapper, safeAgentInput);
+		const second = await createAgent(wrapper, {
+			...safeAgentInput,
+			agentTitle: "Summarizer",
+			configurations: {
+				...safeAgentInput.configurations,
+				primitives: {
+					summarize: safeAgentInput.configurations.primitives.status,
+				},
+			},
+		});
+
+		const create = renderHook(() => useCreateChain(), { wrapper });
+		const chain = await act(() =>
+			create.result.current.mutateAsync({
+				title: "Check then summarize",
+				steps: [
+					{ agent_id: first.id, label: "Check" },
+					{ agent_id: second.id, label: "Summarize" },
+				],
+			}),
+		);
+
+		const list = renderHook(() => useChains(), { wrapper });
+		await waitFor(() =>
+			expect(list.result.current.data?.items).toHaveLength(1),
+		);
+		const byId = renderHook(() => useChain(chain.id), { wrapper });
+		await waitFor(() => expect(byId.result.current.data?.id).toBe(chain.id));
+
+		const start = renderHook(() => useStartChainRun(chain.id), { wrapper });
+		const run = await act(() =>
+			start.result.current.mutateAsync({ input: "INC-9" }),
+		);
+		expect(run.status).toBe("running");
+		expect(run.input).toBe("INC-9");
+
+		const poll = renderHook(() => useChainRun(run.id, { pollIntervalMs: 5 }), {
+			wrapper,
+		});
+		await waitFor(
+			() => expect(poll.result.current.data?.status).toBe("succeeded"),
+			{ timeout: 8000 },
+		);
+		expect(poll.result.current.data?.final_result?.output).toMatch(
+			/all checks passed/i,
+		);
 	});
 });

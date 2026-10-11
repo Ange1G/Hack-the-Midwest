@@ -10,8 +10,9 @@ from app.core.database import Base, get_engine, get_session_factory, reset_datab
 from app.domains.agents.models import Agent
 from app.domains.connectors.models import Connector
 from app.domains.executions.models import AgentExecution
+from app.domains.chains.models import AgentChain, ChainRun
 from app.domains.webhooks.models import Webhook
-from app.scheduler.models import ScheduledExecutionFire
+from app.scheduler.models import ScheduledChainFire, ScheduledExecutionFire
 from app.main import create_app
 
 
@@ -31,11 +32,34 @@ async def database_harness() -> AsyncGenerator[None]:
             await conn.execute(
                 text("ALTER TABLE agent_executions ADD COLUMN IF NOT EXISTS input TEXT")
             )
+            await conn.execute(
+                text(
+                    "ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS "
+                    "target_type VARCHAR(16) NOT NULL DEFAULT 'agent'"
+                )
+            )
+            await conn.execute(
+                text("ALTER TABLE webhooks ALTER COLUMN target_agent_id DROP NOT NULL")
+            )
+            await conn.execute(
+                text("ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS target_chain_id UUID")
+            )
+            await conn.execute(
+                text(
+                    "DO $$ BEGIN "
+                    "ALTER TABLE webhooks ADD CONSTRAINT fk_webhooks_target_chain_id "
+                    "FOREIGN KEY (target_chain_id) REFERENCES agent_chains(id) ON DELETE CASCADE; "
+                    "EXCEPTION WHEN duplicate_object THEN NULL; END $$"
+                )
+            )
         session_factory = get_session_factory()
         async with session_factory() as session:
+            await session.execute(delete(ScheduledChainFire))
             await session.execute(delete(ScheduledExecutionFire))
             await session.execute(delete(AgentExecution))
             await session.execute(delete(Webhook))
+            await session.execute(delete(ChainRun))
+            await session.execute(delete(AgentChain))
             await session.execute(delete(Agent))
             await session.commit()
     except Exception as exc:

@@ -48,10 +48,21 @@ test("signed-in screens have no serious accessibility violations", async ({
 	await expectAccessible(page, "agents list");
 
 	await page.getByRole("link", { name: "New agent" }).click();
-	await page.getByRole("button", { name: "Add HTTP call" }).click();
-	await page.getByLabel("Method").selectOption("POST");
-	await expect(page.getByLabel("Payload (JSON)")).toBeVisible();
+	await page.getByRole("button", { name: "Create connector" }).click();
+	await page.getByRole("radio", { name: /database/i }).first().click();
+	await expect(page.getByLabel("Host")).toBeVisible();
 	await expectAccessible(page, "agent builder");
+
+	await page.getByRole("link", { name: "Connectors" }).click();
+	await expect(
+		page.getByRole("heading", { name: "Connectors", exact: true }),
+	).toBeVisible();
+	await expectAccessible(page, "connectors list");
+
+	await page.getByRole("link", { name: "New connector" }).click();
+	await page.getByRole("radio", { name: /database/i }).click();
+	await expect(page.getByLabel("Host")).toBeVisible();
+	await expectAccessible(page, "connector builder");
 
 	await page.getByRole("link", { name: "Agents", exact: true }).click();
 	await page.getByRole("link", { name: "Secret leaker" }).click();
@@ -66,6 +77,24 @@ test("signed-in screens have no serious accessibility violations", async ({
 		"Terminated by the security monitor",
 	);
 	await expectAccessible(page, "failed run");
+
+	await page.getByRole("link", { name: "Webhooks" }).click();
+	await expect(
+		page.getByRole("heading", { name: "Webhooks", exact: true }),
+	).toBeVisible();
+	await expectAccessible(page, "webhooks");
+
+	await page.getByRole("link", { name: "Chains", exact: true }).click();
+	await expect(
+		page.getByRole("heading", { name: "Chains", exact: true }),
+	).toBeVisible();
+	await expectAccessible(page, "chains list");
+
+	await page.getByRole("link", { name: "Triage then summarize" }).click();
+	await expect(
+		page.getByRole("heading", { name: "Triage then summarize" }),
+	).toBeVisible();
+	await expectAccessible(page, "chain detail");
 
 	await page.getByRole("link", { name: "Security" }).click();
 	await expect(

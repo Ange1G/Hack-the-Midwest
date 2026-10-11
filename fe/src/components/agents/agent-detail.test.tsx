@@ -60,6 +60,31 @@ describe("AgentDetail", () => {
 		expect(screen.getByText(/09:00, 17:00/i)).toBeInTheDocument();
 	});
 
+	it("starts a run with the optional input", async () => {
+		const agent = seedAgent();
+		const user = userEvent.setup();
+		const onRunStarted = vi.fn();
+		renderWithProviders(
+			<AgentDetail agentId={agent.id} onRunStarted={onRunStarted} />,
+		);
+
+		await user.type(
+			await screen.findByLabelText(/run input/i),
+			"ticket INC-42",
+		);
+		await user.click(screen.getByRole("button", { name: /run agent/i }));
+
+		await waitFor(() =>
+			expect(onRunStarted).toHaveBeenCalledWith(
+				expect.objectContaining({
+					status: "queued",
+					agent_id: agent.id,
+					input: "ticket INC-42",
+				}),
+			),
+		);
+	});
+
 	it("starts a run and reports it", async () => {
 		const agent = seedAgent();
 		const user = userEvent.setup();

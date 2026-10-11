@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from app.common.pagination import clamp_page_size
@@ -12,15 +13,23 @@ from app.domains.executions.repository import ExecutionRepository, is_terminal
 from app.domains.executions.schemas import ExecutionComplete, ExecutionCreate, ExecutionRead
 from app.domains.executions.tokens import callback_token_matches
 
+TerminalHook = Callable[[AgentExecution], Awaitable[None]]
+
 
 class ExecutionService:
     def __init__(
         self,
         executions: ExecutionRepository,
         agents: AgentRepository,
+        *,
+        terminal_hook: TerminalHook | None = None,
     ) -> None:
         self._executions = executions
         self._agents = agents
+        self._terminal_hook = terminal_hook
+
+    def set_terminal_hook(self, hook: TerminalHook | None) -> None:
+        self._terminal_hook = hook
 
     async def enqueue(
         self,
@@ -102,6 +111,7 @@ class ExecutionService:
         ):
             raise UnauthorizedError("Invalid execution callback token")
         if is_terminal(execution.status):
+            await self._notify_terminal(execution)
             return ExecutionRead.model_validate(execution)
 
         status = (
@@ -118,7 +128,13 @@ class ExecutionService:
         )
         if updated is None:
             raise NotFoundError("Execution not found")
+        await self._notify_terminal(updated)
         return ExecutionRead.model_validate(updated)
+
+    async def _notify_terminal(self, execution: AgentExecution) -> None:
+        if self._terminal_hook is None:
+            return
+        await self._terminal_hook(execution)
 
 
 def agent_manifest(agent: Agent) -> dict[str, Any]:

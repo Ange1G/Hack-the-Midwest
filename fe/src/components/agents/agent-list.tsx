@@ -26,7 +26,7 @@ import {
 	useStartRun,
 } from "#/lib/api/queries";
 import type { Agent, Connector, Execution } from "#/lib/api/schemas";
-import { httpContractFromConnector } from "#/lib/api/schemas";
+import { connectorLabel, httpContractFromConnector } from "#/lib/api/schemas";
 import { formatDateTime } from "#/lib/format";
 import { buttonLinkClass, tableLinkClass } from "#/lib/styles";
 
@@ -52,19 +52,25 @@ function lastExecutionFor(
 	return fallback;
 }
 
-function httpChipsForAgent(agent: Agent, connectors: Connector[]) {
+function connectorChipsForAgent(agent: Agent, connectors: Connector[]) {
 	const byId = new Map(connectors.map((item) => [item.id, item]));
 	return Object.keys(agent.configurations.primitives).flatMap((id) => {
 		const connector = byId.get(id);
 		if (!connector) return [];
 		const contract = httpContractFromConnector(connector);
-		if (!contract) return [];
+		if (contract) {
+			return [
+				<HttpCallChip
+					key={id}
+					method={contract.method}
+					name={connector.name}
+				/>,
+			];
+		}
 		return [
-			<HttpCallChip
-				key={id}
-				method={contract.method}
-				name={connector.name}
-			/>,
+			<ToneBadge key={id} tone="info">
+				{connectorLabel(connector.type)} {connector.name}
+			</ToneBadge>,
 		];
 	});
 }
@@ -95,12 +101,12 @@ function dataColumns(
 		},
 		{
 			id: "calls",
-			header: "HTTP calls",
+			header: "Connectors",
 			enableSorting: false,
 			meta: { cellClassName: "whitespace-normal" },
 			cell: ({ row }) => (
 				<div className="flex flex-wrap gap-1">
-					{httpChipsForAgent(row.original, connectors)}
+					{connectorChipsForAgent(row.original, connectors)}
 				</div>
 			),
 		},
@@ -163,7 +169,7 @@ export function AgentList() {
 		return (
 			<EmptyState
 				title="No agents yet"
-				description="Describe what an agent should do, give it the HTTP calls it may make, and run it in an isolated container."
+				description="Describe what an agent should do, add HTTP, MCP, or database tools, and run it in an isolated container."
 				action={
 					<Button asChild>
 						<Link to="/agents/new" className={buttonLinkClass}>

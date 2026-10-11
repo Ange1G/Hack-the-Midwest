@@ -10,6 +10,7 @@ from app.core.secrets import SecretCipher
 from app.domains.agents.models import Agent
 from app.domains.executions.models import AgentExecution
 from app.domains.primitives.base import SECRET_PLACEHOLDER
+from app.domains.chains.models import AgentChain, AgentChainStep, ChainRun
 from app.domains.webhooks.models import Webhook
 from app.domains.webhooks.rate_limit import webhook_rate_limiter
 from app.domains.webhooks.signature import signature_header
@@ -62,7 +63,9 @@ async def test_create_webhook_returns_secret_once(
 ) -> None:
     agent = await _create_agent(db_session)
     created = await _create_webhook(client, agent.id)
+    assert created["target_type"] == "agent"
     assert created["target_agent_id"] == str(agent.id)
+    assert created["target_chain_id"] is None
     assert created["owner_user_sso"] == OWNER
     assert created["secret"] and created["secret"] != SECRET_PLACEHOLDER
     assert created["disabled"] is False
@@ -201,3 +204,46 @@ async def test_fire_oversized_body_returns_413(
     )
     assert fired.status_code == 413
     assert (await db_session.execute(select(AgentExecution))).scalars().all() == []
+
+
+async def test_create_and_fire_chain_webhook(
+    client: AsyncClient, db_session: AsyncSession, encryption_key: str
+) -> None:
+    agent = await _create_agent(db_session)
+    chain = AgentChain(owner_user_sso=OWNER, title="Pipeline", schedule=None)
+    db_session.add(chain)
+    await db_session.flush()
+    db_session.add(AgentChainStep(chain_id=chain.id, position=0, agent_id=agent.id))
+    await db_session.commit()
+    await db_session.refresh(chain)
+
+    created = await client.post(
+        CRUD,
+        headers=AUTH,
+        json={"target_type": "chain", "target_chain_id": str(chain.id)},
+    )
+    assert created.status_code == 201, created.text
+    webhook = created.json()["data"]
+    assert webhook["target_type"] == "chain"
+    assert webhook["target_chain_id"] == str(chain.id)
+    assert webhook["target_agent_id"] is None
+
+    body = b'{"ticket":"INC-9"}'
+    fired = await client.post(
+        f"/api/v1/hooks/{webhook['id']}",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Webhook-Signature": signature_header(webhook["secret"], body),
+        },
+    )
+    assert fired.status_code == 202, fired.text
+    data = fired.json()["data"]
+    assert data["chain_id"] == str(chain.id)
+    assert data["status"] == "running"
+    assert data["trigger"] == "webhook"
+    assert data["input"] == '{"ticket":"INC-9"}'
+    row = (
+        await db_session.execute(select(ChainRun).where(ChainRun.id == data["id"]))
+    ).scalar_one()
+    assert row.trigger == "webhook"

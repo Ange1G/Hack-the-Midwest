@@ -12,10 +12,10 @@ function NewAgentPage() {
 		<>
 			<PageHeader
 				title="New agent"
-				description="Describe what the agent should do and pick the tools it may use."
+				description="Describe what the agent should do and add the HTTP, MCP, or database tools it may use."
 			/>
 			<AgentForm
-				onCreated={(agent) =>
+				onSaved={(agent) =>
 					navigate({ to: "/agents/$agentId", params: { agentId: agent.id } })
 				}
 			/>

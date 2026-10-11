@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     scheduler_timezone: str = "UTC"
     webhook_max_body_bytes: int = 20_000
     webhook_rate_limit_per_minute: int = 30
+    max_chain_steps: int = 10
+    max_chain_handoff_bytes: int = 20_000
 
     @field_validator("cors_origins", mode="before")
     @classmethod

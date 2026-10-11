@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Protocol
 from zoneinfo import ZoneInfo
 
-from app.domains.agents.configurations import AgentConfigurations
+
+class ScheduleLike(Protocol):
+    month: int | None
+    day_of_week: list[int]
+    time_of_day: list[int]
 
 
 def current_slot(local_now: datetime) -> str:
@@ -14,26 +19,26 @@ def current_slot(local_now: datetime) -> str:
 
 
 def matching_slot(
-    configurations: AgentConfigurations,
+    schedule: ScheduleLike,
     now: datetime,
     timezone_name: str,
 ) -> str | None:
     """Return the dedupe slot key if `now` is a scheduled minute, else None.
 
-    Empty `timeOfDay` means the agent is not scheduled. Empty `dayOfWeek` means
+    Empty `timeOfDay` means the resource is not scheduled. Empty `dayOfWeek` means
     every day. `month` None means every month. Times are interpreted in
     `timezone_name` (MVP default UTC).
     """
-    if not configurations.time_of_day:
+    if not schedule.time_of_day:
         return None
     tz = ZoneInfo(timezone_name)
     local = now.astimezone(tz)
-    if configurations.month is not None and local.month != configurations.month:
+    if schedule.month is not None and local.month != schedule.month:
         return None
     js_weekday = (local.weekday() + 1) % 7
-    if configurations.day_of_week and js_weekday not in configurations.day_of_week:
+    if schedule.day_of_week and js_weekday not in schedule.day_of_week:
         return None
     minute = local.hour * 60 + local.minute
-    if minute not in configurations.time_of_day:
+    if minute not in schedule.time_of_day:
         return None
     return current_slot(local)

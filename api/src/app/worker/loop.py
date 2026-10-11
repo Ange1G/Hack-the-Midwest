@@ -12,6 +12,7 @@ from app.domains.agents.repository import SqlAlchemyAgentRepository
 from app.domains.connectors.repository import SqlAlchemyConnectorRepository
 from app.domains.executions.models import ExecutionStatus
 from app.domains.executions.repository import SqlAlchemyExecutionRepository, is_terminal
+from app.domains.chains.orchestrator import notify_execution_terminal
 from app.domains.executions.service import agent_manifest
 from app.domains.executions.tokens import generate_callback_token, hash_callback_token
 from app.runtime.agent_databases import AgentDatabaseError, Resolver, agent_databases
@@ -80,6 +81,7 @@ async def process_once(
             claimed.execution_id,
             error_code="llm_unconfigured",
             error_message="OPENAI_API_KEY is not configured on the worker",
+            settings=settings,
         )
         return True
 
@@ -100,9 +102,10 @@ async def process_once(
             claimed.execution_id,
             error_code="database_unavailable",
             error_message=str(exc),
+            settings=settings,
         )
         return True
-    await _reconcile(session_factory, claimed.execution_id, outcome)
+    await _reconcile(session_factory, claimed.execution_id, outcome, settings)
     return True
 
 
@@ -193,12 +196,14 @@ async def _claim(
             return None
         agent = await agents.get_owned(execution.owner_user_sso, execution.agent_id)
         if agent is None:
-            await executions.fail_if_running(
+            updated = await executions.fail_if_running(
                 execution.id,
                 status=ExecutionStatus.FAILED.value,
                 error_code="agent_missing",
                 error_message="Agent was not found when the run was claimed",
             )
+            if updated is not None:
+                await notify_execution_terminal(session, updated, settings)
             return None
         try:
             http_bundle, mcp_bundle = await _connector_bundles(
@@ -208,12 +213,14 @@ async def _claim(
                 list_mcp_tools=list_mcp_tools,
             )
         except BundleBuildError as exc:
-            await executions.fail_if_running(
+            updated = await executions.fail_if_running(
                 execution.id,
                 status=ExecutionStatus.FAILED.value,
                 error_code=exc.code,
                 error_message=exc.message,
             )
+            if updated is not None:
+                await notify_execution_terminal(session, updated, settings)
             return None
         return ClaimedJob(
             execution_id=execution.id,
@@ -257,6 +264,7 @@ async def _reconcile(
     session_factory: async_sessionmaker[AsyncSession],
     execution_id: uuid.UUID,
     outcome: RunOutcome,
+    settings: Settings,
 ) -> None:
     async with session_factory() as session:
         executions = SqlAlchemyExecutionRepository(session)
@@ -268,30 +276,31 @@ async def _reconcile(
                 await executions.merge_runner_meta(current.id, outcome.runner_meta)
             return
         if outcome.timed_out:
-            await executions.fail_if_running(
+            updated = await executions.fail_if_running(
                 current.id,
                 status=ExecutionStatus.TIMED_OUT.value,
                 error_code="timed_out",
                 error_message="Execution timed out",
                 runner_meta=outcome.runner_meta,
             )
-            return
-        if outcome.exit_code not in (0, None):
-            await executions.fail_if_running(
+        elif outcome.exit_code not in (0, None):
+            updated = await executions.fail_if_running(
                 current.id,
                 status=ExecutionStatus.FAILED.value,
                 error_code="container_exit",
                 error_message=f"Container exited with code {outcome.exit_code}",
                 runner_meta=outcome.runner_meta,
             )
-            return
-        await executions.fail_if_running(
-            current.id,
-            status=ExecutionStatus.FAILED.value,
-            error_code="callback_missing",
-            error_message="Container finished without posting a result",
-            runner_meta=outcome.runner_meta,
-        )
+        else:
+            updated = await executions.fail_if_running(
+                current.id,
+                status=ExecutionStatus.FAILED.value,
+                error_code="callback_missing",
+                error_message="Container finished without posting a result",
+                runner_meta=outcome.runner_meta,
+            )
+        if updated is not None:
+            await notify_execution_terminal(session, updated, settings)
 
 
 async def _fail_running(
@@ -300,15 +309,18 @@ async def _fail_running(
     *,
     error_code: str,
     error_message: str,
+    settings: Settings,
 ) -> None:
     async with session_factory() as session:
         executions = SqlAlchemyExecutionRepository(session)
-        await executions.fail_if_running(
+        updated = await executions.fail_if_running(
             execution_id,
             status=ExecutionStatus.FAILED.value,
             error_code=error_code,
             error_message=error_message,
         )
+        if updated is not None:
+            await notify_execution_terminal(session, updated, settings)
 
 
 def _callback_url(settings: Settings, execution_id: uuid.UUID) -> str:

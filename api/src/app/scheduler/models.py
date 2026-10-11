@@ -32,3 +32,29 @@ class ScheduledExecutionFire(Base):
         nullable=False,
         server_default=func.now(),
     )
+
+
+class ScheduledChainFire(Base):
+    """One row per chain + schedule slot so a poll cannot enqueue twice."""
+
+    __tablename__ = "scheduled_chain_fires"
+    __table_args__ = (
+        UniqueConstraint("chain_id", "slot_key", name="uq_scheduled_chain_fires_slot"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+    )
+    chain_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_chains.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    slot_key: Mapped[str] = mapped_column(String(32), nullable=False)
+    fired_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )

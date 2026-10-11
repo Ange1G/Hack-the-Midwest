@@ -44,3 +44,24 @@ class AgentCreate(BaseModel):
         max_length=MAX_SYSTEM_PROMPT_LENGTH,
     )
     configurations: dict[str, Any]
+
+
+class AgentUpdate(BaseModel):
+    """PATCH body. Present fields replace stored values; configurations is a full replace."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: (
+        Annotated[
+            str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
+        ]
+        | None
+    ) = Field(
+        default=None, validation_alias=AliasChoices("agentTitle", "agentTile", "title")
+    )
+    system_prompt: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("systemPrompt", "system_prompt"),
+        max_length=MAX_SYSTEM_PROMPT_LENGTH,
+    )
+    configurations: dict[str, Any] | None = None

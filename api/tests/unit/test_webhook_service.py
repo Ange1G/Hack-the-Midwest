@@ -213,7 +213,7 @@ async def test_fire_enqueues_compact_json_input() -> None:
         settings=SETTINGS,
         cipher=cipher,
     )
-    assert result.status == "queued"
+    assert result["status"] == "queued"
     assert executions.enqueued[0][2] is not None
     assert executions.enqueued[0][2].input == '{"ticket":"INC-1"}'
 

@@ -21,6 +21,8 @@ class AgentRepository(Protocol):
 
     async def get_owned(self, owner_user_sso: str, agent_id: uuid.UUID) -> Agent | None: ...
 
+    async def save(self, agent: Agent) -> Agent: ...
+
 
 class SqlAlchemyAgentRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -69,3 +71,8 @@ class SqlAlchemyAgentRepository:
             select(Agent).where(Agent.id == agent_id, Agent.owner_user_sso == owner_user_sso)
         )
         return result.scalar_one_or_none()
+
+    async def save(self, agent: Agent) -> Agent:
+        await self._session.commit()
+        await self._session.refresh(agent)
+        return agent

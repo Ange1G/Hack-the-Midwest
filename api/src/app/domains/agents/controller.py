@@ -6,7 +6,7 @@ from app.common.pagination import total_pages as compute_total_pages
 from app.core.config import Settings
 from app.core.request_context import request_id_ctx
 from app.domains.agents.schemas import AgentRead
-from app.domains.agents.schemas import AgentCreate
+from app.domains.agents.schemas import AgentCreate, AgentUpdate
 from app.domains.agents.service import ConnectorLookup
 from app.domains.agents.service import AgentService
 
@@ -74,6 +74,25 @@ class AgentsController:
     ) -> ApiEnvelope[AgentRead]:
         agent = await self._service.create_agent(
             user_sso, body, caller=caller, connectors=connectors
+        )
+        return ApiEnvelope[AgentRead](
+            data=agent,
+            error=None,
+            metadata=ApiMetadata(request_id=request_id_ctx.get()),
+            pagination=None,
+        )
+
+    async def update(
+        self,
+        user_sso: str,
+        agent_id: uuid.UUID,
+        body: AgentUpdate,
+        *,
+        caller: CurrentUser,
+        connectors: ConnectorLookup,
+    ) -> ApiEnvelope[AgentRead]:
+        agent = await self._service.update_agent(
+            user_sso, agent_id, body, caller=caller, connectors=connectors
         )
         return ApiEnvelope[AgentRead](
             data=agent,

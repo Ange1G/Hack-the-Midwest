@@ -25,4 +25,11 @@ describe("StatusBadge", () => {
 		render(<StatusBadge status="succeeded" />);
 		expect(screen.getByText("Succeeded")).toBeInTheDocument();
 	});
+
+	it("maps chain step statuses", () => {
+		const { rerender } = render(<StatusBadge status="pending" />);
+		expect(screen.getByText("Pending")).toBeInTheDocument();
+		rerender(<StatusBadge status="skipped" />);
+		expect(screen.getByText("Skipped")).toBeInTheDocument();
+	});
 });

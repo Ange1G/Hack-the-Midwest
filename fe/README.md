@@ -21,8 +21,15 @@ npm run dev
 | `npm run check` | Biome lint and format check. |
 
 The API contract the frontend is built against lives in
-`spec/2026-10-10-frontend-dashboard/plan.md`; the schemas in `src/lib/api/schemas.ts`
-are the single place that encodes it.
+`spec/2026-10-10-frontend-dashboard/plan.md` plus later agent-flow specs
+(`spec/2026-10-21-execution-per-run-input`, `spec/2026-10-21-webhook-triggers`,
+`spec/2026-10-21-agent-chaining/frontend.md`). The schemas in
+`src/lib/api/schemas.ts` are the single place that encodes the wire shape.
+
+Signed-in screens: agents, connectors, chains, webhooks, security, run detail,
+and chain-run detail. Agents can create HTTP, MCP, and database connectors inline or attach
+existing ones by id. Webhooks can target an agent or a chain. Mock mode
+(`npm run dev:mock`) mirrors the `/api/v1` routes in MSW.
 
 # Building For Production
 
