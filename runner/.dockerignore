@@ -1,0 +1,4 @@
+# CA bundles — mounted at run-time via EXECUTION_SSL_CA_BUNDLE; never baked in
+*.pem
+*.crt
+*.cer

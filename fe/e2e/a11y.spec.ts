@@ -65,9 +65,11 @@ test("signed-in screens have no serious accessibility violations", async ({
 	await expect(page.getByRole("alert")).toContainText(
 		"Terminated by the security monitor",
 	);
-	await expectAccessible(page, "killed run");
+	await expectAccessible(page, "failed run");
 
 	await page.getByRole("link", { name: "Security" }).click();
-	await expect(page.getByText("exfiltration.untrusted_destination")).toBeVisible();
+	await expect(
+		page.getByText("Security monitoring is not available yet"),
+	).toBeVisible();
 	await expectAccessible(page, "security findings");
 });

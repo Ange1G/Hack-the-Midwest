@@ -13,6 +13,9 @@ from app.core.secrets import SecretCipher
 from app.domains.connectors.controller import ConnectorsController
 from app.domains.connectors.repository import SqlAlchemyConnectorRepository
 from app.domains.connectors.service import ConnectorService
+from app.domains.executions.controller import ExecutionsController
+from app.domains.executions.repository import SqlAlchemyExecutionRepository
+from app.domains.executions.service import ExecutionService
 
 
 async def get_current_user(
@@ -70,3 +73,14 @@ async def get_connectors_controller(
     settings: Settings = Depends(get_settings),
 ) -> ConnectorsController:
     return ConnectorsController(service=ConnectorService(repository), settings=settings)
+
+
+async def get_executions_controller(
+    session: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> ExecutionsController:
+    service = ExecutionService(
+        SqlAlchemyExecutionRepository(session),
+        SqlAlchemyAgentRepository(session),
+    )
+    return ExecutionsController(service=service, settings=settings)

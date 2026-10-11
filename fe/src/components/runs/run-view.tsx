@@ -1,23 +1,18 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { PageHeader } from "#/components/layout/page";
 import { Notice } from "#/components/notice";
 import { ErrorState, LoadingState } from "#/components/states";
 import { StatusBadge } from "#/components/status-badge";
-import { type Tone, ToneBadge } from "#/components/tone-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "#/components/ui/card";
 import {
 	agentQueryOptions,
-	findingsQueryOptions,
 	isActiveRunStatus,
 	queryKeys,
 	useRun,
-	useRunEvents,
 } from "#/lib/api/queries";
-import type { Run, RunEvent } from "#/lib/api/schemas";
+import type { Run } from "#/lib/api/schemas";
 import { formatDateTime, formatDuration } from "#/lib/format";
-import { textLinkClass } from "#/lib/styles";
 
 export function RunView({
 	runId,
@@ -28,23 +23,23 @@ export function RunView({
 }) {
 	const queryClient = useQueryClient();
 	const run = useRun(runId, { pollIntervalMs });
-	const events = useRunEvents(runId, { pollIntervalMs });
 	const agentId = run.data?.agent_id;
 	const status = run.data?.status;
 	const agent = useQuery({
 		...agentQueryOptions(agentId ?? ""),
 		enabled: agentId !== undefined,
 	});
-	const findings = useQuery({
-		...findingsQueryOptions({ run_id: runId }),
-		enabled: status === "killed",
-	});
 
-	// Once the run settles, the agent's last-run summary and history are stale.
 	useEffect(() => {
 		if (agentId && status && !isActiveRunStatus(status)) {
 			void queryClient.invalidateQueries({
 				queryKey: queryKeys.agent(agentId),
+			});
+			void queryClient.invalidateQueries({
+				queryKey: queryKeys.executions,
+			});
+			void queryClient.invalidateQueries({
+				queryKey: queryKeys.agentRuns(agentId),
 			});
 		}
 	}, [agentId, status, queryClient]);
@@ -63,8 +58,9 @@ export function RunView({
 	}
 
 	const data = run.data;
-	const finding = findings.data?.[0];
 	const live = isActiveRunStatus(data.status);
+	const output = data.result?.output;
+	const toolCalls = data.result?.tool_calls;
 
 	return (
 		<>
@@ -74,31 +70,20 @@ export function RunView({
 				action={<StatusBadge status={data.status} />}
 			/>
 
-			{data.status === "killed" ? (
-				<Notice
-					tone="danger"
-					className="mb-6"
-					title={data.error ?? "Terminated by the security monitor"}
-				>
-					{finding ? (
-						<>
-							<p>{finding.message}</p>
-							<p>
-								<code>{finding.rule}</code> · severity {finding.severity}
-							</p>
-						</>
+			{data.status === "failed" && data.error_message ? (
+				<Notice tone="danger" className="mb-6" title="Run failed">
+					<p>{data.error_message}</p>
+					{data.error_code ? (
+						<p>
+							<code>{data.error_code}</code>
+						</p>
 					) : null}
-					<p>
-						<Link to="/security" className={textLinkClass}>
-							See all findings
-						</Link>
-					</p>
 				</Notice>
 			) : null}
 
-			{data.status === "failed" && data.error ? (
-				<Notice tone="danger" className="mb-6" title="Run failed">
-					<p>{data.error}</p>
+			{data.status === "timed_out" ? (
+				<Notice tone="danger" className="mb-6" title="Run timed out">
+					<p>{data.error_message ?? "Execution timed out"}</p>
 				</Notice>
 			) : null}
 
@@ -110,8 +95,8 @@ export function RunView({
 						<CardTitle>Output</CardTitle>
 					</CardHeader>
 					<CardContent>
-						{data.output ? (
-							<pre className="whitespace-pre-wrap text-sm">{data.output}</pre>
+						{output ? (
+							<pre className="whitespace-pre-wrap text-sm">{output}</pre>
 						) : (
 							<p className="text-sm text-muted-foreground">
 								{live ? "Waiting for the agent to finish…" : "No output."}
@@ -121,10 +106,20 @@ export function RunView({
 				</Card>
 				<Card className="island-shell">
 					<CardHeader>
-						<CardTitle>Event log</CardTitle>
+						<CardTitle>Tool calls</CardTitle>
 					</CardHeader>
 					<CardContent>
-						<EventLog events={events.data ?? []} live={live} />
+						{toolCalls && toolCalls.length > 0 ? (
+							<pre className="overflow-x-auto whitespace-pre-wrap text-xs">
+								{JSON.stringify(toolCalls, null, 2)}
+							</pre>
+						) : (
+							<p className="text-sm text-muted-foreground">
+								{live
+									? "Waiting for the first tool call…"
+									: "No tool calls were recorded."}
+							</p>
+						)}
 					</CardContent>
 				</Card>
 			</div>
@@ -155,41 +150,6 @@ function Timeline({ run }: { run: Run }) {
 					<span className="text-muted-foreground">{duration}</span>
 				</li>
 			) : null}
-		</ol>
-	);
-}
-
-const eventTone: Record<RunEvent["type"], Tone> = {
-	log: "neutral",
-	tool_call: "info",
-	tool_result: "info",
-	security: "danger",
-};
-
-function EventLog({ events, live }: { events: RunEvent[]; live: boolean }) {
-	if (events.length === 0) {
-		return (
-			<p className="text-sm text-muted-foreground">
-				{live ? "Waiting for the first event…" : "No events were recorded."}
-			</p>
-		);
-	}
-	return (
-		<ol
-			className="space-y-2 font-mono text-xs"
-			aria-live={live ? "polite" : "off"}
-		>
-			{events.map((event) => (
-				<li key={event.id} className="flex items-start gap-2">
-					<span className="shrink-0 text-muted-foreground">
-						{new Date(event.ts).toLocaleTimeString()}
-					</span>
-					<ToneBadge tone={eventTone[event.type]} className="shrink-0">
-						{event.type}
-					</ToneBadge>
-					<span className="break-all">{event.message}</span>
-				</li>
-			))}
 		</ol>
 	);
 }

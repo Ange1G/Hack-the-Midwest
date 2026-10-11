@@ -7,7 +7,7 @@ import { signInAs } from "#/test/session";
 import { RunView } from "./run-view";
 
 describe("RunView", () => {
-	it("polls a run from queued to succeeded and shows its output and events", async () => {
+	it("polls a run from queued to succeeded and shows its output", async () => {
 		const owner = signInAs();
 		const agent = createAgent(owner.user_sso, safeAgentInput);
 		const run = createRun(agent);
@@ -19,19 +19,11 @@ describe("RunView", () => {
 		).toBeInTheDocument();
 		expect(await screen.findByText(/all checks passed/i)).toBeInTheDocument();
 		expect(
-			await screen.findByText(/agent "uptime checker" started/i),
-		).toBeInTheDocument();
-		expect(
-			screen.getByText(
-				/GET https:\/\/status\.example\.com\/api\/v2\/status\.json/,
-			),
-		).toBeInTheDocument();
-		expect(
 			await screen.findByRole("heading", { name: /uptime checker/i }),
 		).toBeInTheDocument();
 	});
 
-	it("shows the killed state together with the security finding", async () => {
+	it("shows the failed state together with the policy error", async () => {
 		const owner = signInAs();
 		const agent = createAgent(owner.user_sso, rogueAgentInput);
 		const run = createRun(agent);
@@ -44,7 +36,7 @@ describe("RunView", () => {
 		await waitFor(() =>
 			expect(alert).toHaveTextContent(/untrusted destination/i),
 		);
-		expect(screen.getByText(/^killed$/i)).toBeInTheDocument();
+		expect(screen.getByText(/^failed$/i)).toBeInTheDocument();
 	});
 
 	it("shows an error state when the run does not exist", async () => {

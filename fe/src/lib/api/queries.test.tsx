@@ -11,10 +11,9 @@ import {
 	useAgent,
 	useAgents,
 	useCreateAgent,
-	useFindings,
+	useConnectors,
 	useMe,
 	useRun,
-	useRunEvents,
 	useSignIn,
 	useSignOut,
 	useStartRun,
@@ -45,8 +44,7 @@ describe("isActiveRunStatus", () => {
 		expect(isActiveRunStatus("running")).toBe(true);
 		expect(isActiveRunStatus("succeeded")).toBe(false);
 		expect(isActiveRunStatus("failed")).toBe(false);
-		expect(isActiveRunStatus("killed")).toBe(false);
-		expect(isActiveRunStatus("cancelled")).toBe(false);
+		expect(isActiveRunStatus("timed_out")).toBe(false);
 	});
 });
 
@@ -128,8 +126,10 @@ describe("agent hooks", () => {
 			flagged: false,
 			last_run: null,
 		});
-		expect(created.configurations.primitives.status).toEqual(
-			safeAgentInput.configurations.primitives.status,
+		const connectorIds = Object.keys(created.configurations.primitives);
+		expect(connectorIds).toHaveLength(1);
+		expect(created.configurations.primitives[connectorIds[0] ?? ""]).toEqual(
+			{},
 		);
 
 		await waitFor(() =>
@@ -156,10 +156,19 @@ describe("agent hooks", () => {
 				},
 			},
 		});
-		const contract = created.configurations.primitives.status;
-		expect(contract?.xApiKey).toBe("********");
-		expect(contract?.authorizationHeader).toBe("********");
+		const connectors = renderHook(() => useConnectors(), { wrapper });
+		await waitFor(() =>
+			expect(connectors.result.current.data?.length).toBeGreaterThan(0),
+		);
+		const stored = connectors.result.current.data?.[0]?.contract as {
+			credentials?: { xApiKey?: string; authorizationHeader?: string };
+		};
+		expect(stored?.credentials?.xApiKey).toBe("********");
+		expect(stored?.credentials?.authorizationHeader).toBe("********");
 		expect(JSON.stringify(created)).not.toContain("key-live-123");
+		expect(JSON.stringify(connectors.result.current.data)).not.toContain(
+			"key-live-123",
+		);
 	});
 
 	it("rejects an unsafe URL with the backend's error shape", async () => {
@@ -186,9 +195,9 @@ describe("agent hooks", () => {
 		await waitFor(() => expect(result.current.isError).toBe(true));
 		expect(result.current.error).toMatchObject({
 			status: 422,
-			code: "invalid_configuration",
+			code: "invalid_connector",
 			fields: {
-				"configurations.primitives.scrape.URL":
+				"config.URL":
 					"Private, loopback and link-local addresses are not allowed",
 			},
 		});
@@ -239,17 +248,7 @@ describe("run hooks", () => {
 			{ timeout: 4000 },
 		);
 		expect(seen).toEqual(["queued", "running", "succeeded"]);
-		expect(poll.result.current.data?.output).toBeTruthy();
-
-		const events = renderHook(
-			() => useRunEvents(run.id, { pollIntervalMs: 5 }),
-			{ wrapper },
-		);
-		await waitFor(() =>
-			expect(events.result.current.data?.length).toBeGreaterThan(1),
-		);
-		const types = events.result.current.data?.map((event) => event.type);
-		expect(types).toEqual(expect.arrayContaining(["tool_call", "tool_result"]));
+		expect(poll.result.current.data?.result?.output).toBeTruthy();
 
 		const detail = renderHook(() => useAgent(agent.id), { wrapper });
 		await waitFor(() =>
@@ -267,21 +266,12 @@ describe("run hooks", () => {
 			wrapper,
 		});
 		await waitFor(
-			() => expect(poll.result.current.data?.status).toBe("killed"),
+			() => expect(poll.result.current.data?.status).toBe("failed"),
 			{ timeout: 4000 },
 		);
-		expect(poll.result.current.data?.finding_id).toBeTruthy();
-
-		const findings = renderHook(() => useFindings({ run_id: run.id }), {
-			wrapper,
-		});
-		await waitFor(() => expect(findings.result.current.data).toHaveLength(1));
-		expect(findings.result.current.data?.[0]).toMatchObject({
-			action: "killed",
-			severity: "critical",
-			rule: "exfiltration.untrusted_destination",
-			agent_id: agent.id,
-		});
+		expect(poll.result.current.data?.error_message).toMatch(
+			/untrusted destination/i,
+		);
 
 		const detail = renderHook(() => useAgent(agent.id), { wrapper });
 		await waitFor(() => expect(detail.result.current.data?.flagged).toBe(true));

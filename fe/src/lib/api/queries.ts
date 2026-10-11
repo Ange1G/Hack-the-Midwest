@@ -9,11 +9,15 @@ import {
 	type Agent,
 	type AgentInput,
 	agentSchema,
-	findingSchema,
+	type Connector,
+	type ConnectorCreate,
+	connectorCreateFromHttpCall,
+	connectorSchema,
+	executionSchema,
+	type Pagination,
+	type Finding,
 	type Run,
 	type RunStatus,
-	runEventSchema,
-	runSchema,
 	type SignInInput,
 	signInInputSchema,
 } from "./schemas";
@@ -36,9 +40,10 @@ export const queryKeys = {
 	me: ["me"] as const,
 	agents: ["agents"] as const,
 	agent: (id: string) => ["agents", id] as const,
+	connectors: ["connectors"] as const,
+	executions: ["executions"] as const,
 	agentRuns: (id: string) => ["agents", id, "runs"] as const,
 	run: (id: string) => ["runs", id] as const,
-	runEvents: (id: string) => ["runs", id, "events"] as const,
 	findings: (filter: FindingsFilter) => ["findings", filter] as const,
 };
 
@@ -56,6 +61,14 @@ function requireUser(): User {
 
 function agentsPath(user_sso: string): string {
 	return `/agents/${encodeURIComponent(user_sso)}`;
+}
+
+function connectorsPath(user_sso: string): string {
+	return `/connectors/${encodeURIComponent(user_sso)}`;
+}
+
+function executionsPath(user_sso: string): string {
+	return `${agentsPath(user_sso)}/executions`;
 }
 
 // Session
@@ -99,7 +112,6 @@ export function useSignOut() {
 		},
 		onSuccess: () => {
 			queryClient.setQueryData(queryKeys.me, null);
-			// Drop everything the signed-out identity could see.
 			queryClient.removeQueries({
 				predicate: (query) => query.queryKey[0] !== "me",
 			});
@@ -140,33 +152,126 @@ export function useAgent(id: string) {
 	return useQuery(agentQueryOptions(id));
 }
 
+async function createConnectorsForAgent(
+	user_sso: string,
+	input: AgentInput,
+): Promise<Record<string, Record<string, never>>> {
+	const primitives: Record<string, Record<string, never>> = {};
+	for (const [name, contract] of Object.entries(
+		input.configurations.primitives,
+	)) {
+		const body = connectorCreateFromHttpCall(name, contract);
+		const connector = await createConnectorWithUniqueName(user_sso, body);
+		primitives[connector.id] = {};
+	}
+	return primitives;
+}
+
+async function createConnectorWithUniqueName(
+	user_sso: string,
+	body: ConnectorCreate,
+): Promise<Connector> {
+	try {
+		return await api.post(connectorsPath(user_sso), connectorSchema, body);
+	} catch (error) {
+		if (error instanceof ApiError && error.status === 409) {
+			const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 8);
+			return api.post(connectorsPath(user_sso), connectorSchema, {
+				...body,
+				name: `${body.name}_${suffix}`.slice(0, 64),
+			});
+		}
+		throw error;
+	}
+}
+
 export function useCreateAgent() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: (input: AgentInput) => {
+		mutationFn: async (input: AgentInput) => {
 			const user = requireUser();
-			return api.post(agentsPath(user.user_sso), agentSchema, input);
+			const primitives = await createConnectorsForAgent(user.user_sso, input);
+			return api.post(agentsPath(user.user_sso), agentSchema, {
+				...input,
+				configurations: {
+					...input.configurations,
+					primitives,
+				},
+			});
 		},
 		onSuccess: (agent: Agent) => {
 			queryClient.setQueryData(queryKeys.agent(agent.id), agent);
 			void queryClient.invalidateQueries({ queryKey: queryKeys.agents });
+			void queryClient.invalidateQueries({ queryKey: queryKeys.connectors });
 		},
 	});
 }
 
-// Runs
+// Connectors
 
-export function agentRunsQueryOptions(agentId: string) {
+export function connectorsQueryOptions() {
 	return queryOptions({
-		queryKey: queryKeys.agentRuns(agentId),
+		queryKey: queryKeys.connectors,
 		queryFn: () => {
 			const user = requireUser();
 			return api
 				.list(
-					`${agentsPath(user.user_sso)}/${agentId}/runs?page=1&page_size=${LIST_PAGE_SIZE}`,
-					runSchema,
+					`${connectorsPath(user.user_sso)}?page=1&page_size=${LIST_PAGE_SIZE}`,
+					connectorSchema,
 				)
 				.then((r) => r.items);
+		},
+	});
+}
+
+export function useConnectors() {
+	return useQuery(connectorsQueryOptions());
+}
+
+export function useCreateConnector() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (body: ConnectorCreate) => {
+			const user = requireUser();
+			return api.post(connectorsPath(user.user_sso), connectorSchema, body);
+		},
+		onSuccess: () => {
+			void queryClient.invalidateQueries({ queryKey: queryKeys.connectors });
+		},
+	});
+}
+
+// Executions
+
+export function executionsQueryOptions() {
+	return queryOptions({
+		queryKey: queryKeys.executions,
+		queryFn: () => {
+			const user = requireUser();
+			return api
+				.list(
+					`${executionsPath(user.user_sso)}?page=1&page_size=${LIST_PAGE_SIZE}`,
+					executionSchema,
+				)
+				.then((r) => r.items);
+		},
+	});
+}
+
+export function useExecutions() {
+	return useQuery(executionsQueryOptions());
+}
+
+export function agentRunsQueryOptions(agentId: string) {
+	return queryOptions({
+		queryKey: queryKeys.agentRuns(agentId),
+		queryFn: async () => {
+			const user = requireUser();
+			const { items } = await api.list(
+				`${executionsPath(user.user_sso)}?page=1&page_size=${LIST_PAGE_SIZE}`,
+				executionSchema,
+			);
+			return items.filter((item) => item.agent_id === agentId);
 		},
 	});
 }
@@ -184,14 +289,49 @@ export function useStartRun(agentId?: string) {
 				throw new ApiError(400, "invalid_request", "Agent id is required");
 			}
 			const user = requireUser();
-			return api.post(`${agentsPath(user.user_sso)}/${id}/runs`, runSchema);
+			return api.post(
+				`${agentsPath(user.user_sso)}/${id}/executions`,
+				executionSchema,
+			);
 		},
 		onSuccess: (run: Run) => {
 			queryClient.setQueryData(queryKeys.run(run.id), run);
+			queryClient.setQueryData<Run[]>(queryKeys.executions, (current) => {
+				const items = current ?? [];
+				return [run, ...items.filter((item) => item.id !== run.id)];
+			});
+			queryClient.setQueryData<Run[]>(
+				queryKeys.agentRuns(run.agent_id),
+				(current) => {
+					const items = current ?? [];
+					return [run, ...items.filter((item) => item.id !== run.id)];
+				},
+			);
+			const summary = {
+				id: run.id,
+				status: run.status,
+				created_at: run.created_at,
+			};
+			queryClient.setQueryData<Agent>(queryKeys.agent(run.agent_id), (agent) =>
+				agent ? { ...agent, last_run: summary } : agent,
+			);
+			queryClient.setQueryData<{
+				items: Agent[];
+				pagination: Pagination | null;
+			}>(queryKeys.agents, (current) => {
+				if (!current) return current;
+				return {
+					...current,
+					items: current.items.map((agent) =>
+						agent.id === run.agent_id ? { ...agent, last_run: summary } : agent,
+					),
+				};
+			});
 			void queryClient.invalidateQueries({
 				queryKey: queryKeys.agent(run.agent_id),
 			});
 			void queryClient.invalidateQueries({ queryKey: queryKeys.agents });
+			void queryClient.invalidateQueries({ queryKey: queryKeys.executions });
 			void queryClient.invalidateQueries({
 				queryKey: queryKeys.agentRuns(run.agent_id),
 			});
@@ -206,8 +346,11 @@ export function runQueryOptions(
 	return queryOptions({
 		queryKey: queryKeys.run(runId),
 		queryFn: () => {
-			requireUser();
-			return api.get(`/runs/${runId}`, runSchema);
+			const user = requireUser();
+			return api.get(
+				`${executionsPath(user.user_sso)}/${runId}`,
+				executionSchema,
+			);
 		},
 		refetchInterval: (query) => {
 			const status = query.state.data?.status;
@@ -220,42 +363,11 @@ export function useRun(runId: string, options?: PollOptions) {
 	return useQuery(runQueryOptions(runId, options));
 }
 
-export function useRunEvents(
-	runId: string,
-	{ pollIntervalMs = ACTIVE_RUN_POLL_MS }: PollOptions = {},
-) {
-	const queryClient = useQueryClient();
-	return useQuery({
-		queryKey: queryKeys.runEvents(runId),
-		queryFn: () => {
-			requireUser();
-			return api
-				.list(`/runs/${runId}/events`, runEventSchema)
-				.then((r) => r.items);
-		},
-		// Keep polling events only while the run itself is still active.
-		refetchInterval: () => {
-			const run = queryClient.getQueryData<Run>(queryKeys.run(runId));
-			return run && isActiveRunStatus(run.status) ? pollIntervalMs : false;
-		},
-	});
-}
-
-// Security
-
+// Security findings are not implemented on the backend yet.
 export function findingsQueryOptions(filter: FindingsFilter = {}) {
-	const params = new URLSearchParams();
-	if (filter.agent_id) params.set("agent_id", filter.agent_id);
-	if (filter.run_id) params.set("run_id", filter.run_id);
-	const query = params.toString();
 	return queryOptions({
 		queryKey: queryKeys.findings(filter),
-		queryFn: () => {
-			requireUser();
-			return api
-				.list(`/security/findings${query ? `?${query}` : ""}`, findingSchema)
-				.then((r) => r.items);
-		},
+		queryFn: async (): Promise<Finding[]> => [],
 	});
 }
 

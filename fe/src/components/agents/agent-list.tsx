@@ -18,8 +18,15 @@ import { EmptyState, ErrorState, LoadingState } from "#/components/states";
 import { StatusBadge } from "#/components/status-badge";
 import { ToneBadge } from "#/components/tone-badge";
 import { Button } from "#/components/ui/button";
-import { isActiveRunStatus, useAgents, useStartRun } from "#/lib/api/queries";
-import type { Agent } from "#/lib/api/schemas";
+import {
+	isActiveRunStatus,
+	useAgents,
+	useConnectors,
+	useExecutions,
+	useStartRun,
+} from "#/lib/api/queries";
+import type { Agent, Connector, Execution } from "#/lib/api/schemas";
+import { httpContractFromConnector } from "#/lib/api/schemas";
 import { formatDateTime } from "#/lib/format";
 import { buttonLinkClass, tableLinkClass } from "#/lib/styles";
 
@@ -27,66 +34,110 @@ type AgentRowAction = "start" | "stop" | "delete";
 
 const STUB_ACTION_MS = 800;
 
-const dataColumns: DataTableColumn<Agent>[] = [
-	{
-		id: "title",
-		accessorFn: (agent) => agent.title,
-		header: "Name",
-		cell: ({ row }) => (
-			<div className="flex items-center gap-2">
-				<Link
-					to="/agents/$agentId"
-					params={{ agentId: row.original.id }}
-					className={tableLinkClass}
-				>
-					{row.original.title}
-				</Link>
-				{row.original.flagged ? (
-					<ToneBadge tone="danger">Flagged</ToneBadge>
-				) : null}
-			</div>
-		),
-	},
-	{
-		id: "calls",
-		header: "HTTP calls",
-		enableSorting: false,
-		meta: { cellClassName: "whitespace-normal" },
-		cell: ({ row }) => (
-			<div className="flex flex-wrap gap-1">
-				{Object.entries(row.original.configurations.primitives).map(
-					([name, contract]) => (
-						<HttpCallChip key={name} method={contract.method} name={name} />
-					),
-				)}
-			</div>
-		),
-	},
-	{
-		id: "last_run",
-		accessorFn: (agent) => agent.last_run?.status ?? "",
-		header: "Last run",
-		cell: ({ row }) =>
-			row.original.last_run ? (
-				<StatusBadge status={row.original.last_run.status} />
-			) : (
-				<span className="text-sm text-muted-foreground">Never run</span>
-			),
-	},
-	{
-		id: "created_at",
-		accessorFn: (agent) => agent.created_at,
-		header: "Created",
-		cell: ({ row }) => (
-			<span className="text-sm text-muted-foreground">
-				{formatDateTime(row.original.created_at)}
-			</span>
-		),
-	},
-];
+function lastExecutionFor(
+	agentId: string,
+	executions: Execution[],
+	fallback: Agent["last_run"],
+): Agent["last_run"] {
+	const match = executions
+		.filter((item) => item.agent_id === agentId)
+		.sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+	if (match) {
+		return {
+			id: match.id,
+			status: match.status,
+			created_at: match.created_at,
+		};
+	}
+	return fallback;
+}
 
-function isRunning(agent: Agent): boolean {
-	return agent.last_run != null && isActiveRunStatus(agent.last_run.status);
+function httpChipsForAgent(agent: Agent, connectors: Connector[]) {
+	const byId = new Map(connectors.map((item) => [item.id, item]));
+	return Object.keys(agent.configurations.primitives).flatMap((id) => {
+		const connector = byId.get(id);
+		if (!connector) return [];
+		const contract = httpContractFromConnector(connector);
+		if (!contract) return [];
+		return [
+			<HttpCallChip
+				key={id}
+				method={contract.method}
+				name={connector.name}
+			/>,
+		];
+	});
+}
+
+function dataColumns(
+	connectors: Connector[],
+	executions: Execution[],
+): DataTableColumn<Agent>[] {
+	return [
+		{
+			id: "title",
+			accessorFn: (agent) => agent.title,
+			header: "Name",
+			cell: ({ row }) => (
+				<div className="flex items-center gap-2">
+					<Link
+						to="/agents/$agentId"
+						params={{ agentId: row.original.id }}
+						className={tableLinkClass}
+					>
+						{row.original.title}
+					</Link>
+					{row.original.flagged ? (
+						<ToneBadge tone="danger">Flagged</ToneBadge>
+					) : null}
+				</div>
+			),
+		},
+		{
+			id: "calls",
+			header: "HTTP calls",
+			enableSorting: false,
+			meta: { cellClassName: "whitespace-normal" },
+			cell: ({ row }) => (
+				<div className="flex flex-wrap gap-1">
+					{httpChipsForAgent(row.original, connectors)}
+				</div>
+			),
+		},
+		{
+			id: "last_run",
+			accessorFn: (agent) =>
+				lastExecutionFor(agent.id, executions, agent.last_run)?.status ?? "",
+			header: "Last run",
+			cell: ({ row }) => {
+				const last = lastExecutionFor(
+					row.original.id,
+					executions,
+					row.original.last_run,
+				);
+				return last ? (
+					<StatusBadge status={last.status} />
+				) : (
+					<span className="text-sm text-muted-foreground">Never run</span>
+				);
+			},
+		},
+		{
+			id: "created_at",
+			accessorFn: (agent) => agent.created_at,
+			header: "Created",
+			cell: ({ row }) => (
+				<span className="text-sm text-muted-foreground">
+					{formatDateTime(row.original.created_at)}
+				</span>
+			),
+		},
+	];
+}
+
+function isRunning(agent: Agent, executions: Execution[]): boolean {
+	const last = lastExecutionFor(agent.id, executions, agent.last_run);
+	return last != null && isActiveRunStatus(last.status);
 }
 
 export function AgentList() {
@@ -137,6 +188,8 @@ export function AgentList() {
 }
 
 function AgentListTable({ items }: { items: Agent[] }) {
+	const connectors = useConnectors();
+	const executions = useExecutions();
 	const startRun = useStartRun();
 	const [pendingAction, setPendingAction] = useState<{
 		id: string;
@@ -171,7 +224,7 @@ function AgentListTable({ items }: { items: Agent[] }) {
 	};
 
 	const columns: DataTableColumn<Agent>[] = [
-		...dataColumns,
+		...dataColumns(connectors.data ?? [], executions.data ?? []),
 		{
 			id: "actions",
 			header: "Actions",
@@ -183,7 +236,7 @@ function AgentListTable({ items }: { items: Agent[] }) {
 			cell: ({ row }) => {
 				const agent = row.original;
 				const busy = isBusy(agent.id);
-				const running = isRunning(agent);
+				const running = isRunning(agent, executions.data ?? []);
 				return (
 					<DataTableActionsCell>
 						{running ? (

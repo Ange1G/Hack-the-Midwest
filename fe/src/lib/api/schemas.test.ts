@@ -16,19 +16,9 @@ const backendAgent = {
 	system_prompt: "Summarize yesterday's new issues.",
 	configurations: {
 		primitives: {
-			list_issues: {
-				contractVersion: 1,
-				method: "GET",
-				URL: "https://api.github.com/repos/acme/web/issues",
-				options: { retries: 3, timeout: 10000 },
-			},
-			notify: {
-				contractVersion: 1,
-				method: "POST",
-				URL: "https://hooks.example.com/notify",
-				payload: { text: "digest ready" },
-				xApiKey: "********",
-				authorizationHeader: "********",
+			"0b1f1c6a-4f4e-4b1b-9d2a-1c9c3b2d7e12": {},
+			"0b1f1c6a-4f4e-4b1b-9d2a-1c9c3b2d7e13": {
+				allowedTools: ["search_issues"],
 			},
 		},
 		dayOfWeek: [1, 2, 3, 4, 5],
@@ -45,11 +35,14 @@ const backendAgent = {
 const validRun = {
 	id: "run_1",
 	agent_id: backendAgent.id,
+	owner_user_sso: "sso-user-a",
 	status: "queued",
-	output: null,
-	error: null,
-	finding_id: null,
+	result: null,
+	error_code: null,
+	error_message: null,
+	runner_meta: null,
 	created_at: "2026-10-10T19:05:00Z",
+	updated_at: "2026-10-10T19:05:00Z",
 	started_at: null,
 	finished_at: null,
 };
@@ -87,10 +80,12 @@ describe("agentSchema", () => {
 			title: "Weekday GitHub digest",
 			owner_user_sso: "sso-user-a",
 		});
-		expect(parsed.configurations.primitives.list_issues).toEqual(
-			backendAgent.configurations.primitives.list_issues,
+		expect(parsed.configurations.primitives["0b1f1c6a-4f4e-4b1b-9d2a-1c9c3b2d7e12"]).toEqual(
+			{},
 		);
-		expect(parsed.configurations.primitives.notify?.xApiKey).toBe("********");
+		expect(
+			parsed.configurations.primitives["0b1f1c6a-4f4e-4b1b-9d2a-1c9c3b2d7e13"],
+		).toEqual({ allowedTools: ["search_issues"] });
 		expect(parsed.configurations.dayOfWeek).toEqual([1, 2, 3, 4, 5]);
 		expect(parsed.configurations.timeOfDay).toEqual([540]);
 		expect(parsed.configurations.month).toBeUndefined();
@@ -104,12 +99,12 @@ describe("agentSchema", () => {
 			flagged: true,
 			last_run: {
 				id: "run_1",
-				status: "killed",
+				status: "failed",
 				created_at: "2026-10-10T19:05:00Z",
 			},
 		});
 		expect(parsed.flagged).toBe(true);
-		expect(parsed.last_run?.status).toBe("killed");
+		expect(parsed.last_run?.status).toBe("failed");
 	});
 
 	it("tolerates configurations that do not follow the schema", () => {
@@ -266,8 +261,23 @@ describe("envelope", () => {
 });
 
 describe("runSchema", () => {
-	it("parses a valid run", () => {
+	it("parses a valid execution", () => {
 		expect(runSchema.parse(validRun)).toEqual(validRun);
+	});
+
+	it("parses a succeeded execution with nested result output", () => {
+		const parsed = runSchema.parse({
+			...validRun,
+			status: "succeeded",
+			result: { output: "all checks passed", model: "gpt-4o-mini" },
+		});
+		expect(parsed.result?.output).toBe("all checks passed");
+	});
+
+	it("accepts timed_out", () => {
+		expect(runSchema.parse({ ...validRun, status: "timed_out" }).status).toBe(
+			"timed_out",
+		);
 	});
 
 	it("rejects an unknown status", () => {

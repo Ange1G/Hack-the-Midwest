@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.core.database import Base, get_engine, get_session_factory, reset_database_state
 from app.domains.agents.models import Agent
 from app.domains.connectors.models import Connector
+from app.domains.executions.models import AgentExecution
 from app.main import create_app
 
 
@@ -26,6 +27,7 @@ async def database_harness() -> AsyncGenerator[None]:
             await conn.run_sync(Base.metadata.create_all)
         session_factory = get_session_factory()
         async with session_factory() as session:
+            await session.execute(delete(AgentExecution))
             await session.execute(delete(Agent))
             await session.commit()
     except Exception as exc:

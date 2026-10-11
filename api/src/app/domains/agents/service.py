@@ -9,7 +9,7 @@ from typing import Protocol
 from pydantic import ValidationError
 
 from app.common.validation_errors import describe_validation_errors
-from app.core.exceptions import AppError
+from app.core.exceptions import AppError, NotFoundError
 from app.domains.agents.configurations import AgentConfigurations
 from app.domains.agents.models import Agent
 from app.domains.agents.schemas import AgentCreate
@@ -79,6 +79,19 @@ class AgentService:
         )
         created = await self._repository.create(agent)
         return AgentRead.model_validate(created)
+
+    async def get_agent(
+        self,
+        owner_user_sso: str,
+        agent_id: uuid.UUID,
+        *,
+        caller: CurrentUser,
+    ) -> AgentRead:
+        self._ensure_caller_may_access(owner_user_sso, caller)
+        agent = await self._repository.get_owned(owner_user_sso, agent_id)
+        if agent is None:
+            raise NotFoundError("Agent not found")
+        return AgentRead.model_validate(agent)
 
 
 class ConnectorLookup(Protocol):

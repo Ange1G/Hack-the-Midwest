@@ -53,26 +53,28 @@ describe("AgentList", () => {
 
 		renderWithProviders(<AgentList />);
 
-		const safeRow = (
-			await screen.findByRole("link", { name: "Uptime checker" })
-		).closest("tr");
-		const rogueRow = screen
-			.getByRole("link", { name: "Secret leaker" })
-			.closest("tr");
-		if (!safeRow || !rogueRow) throw new Error("expected table rows");
+		await waitFor(() => {
+			const safeRow = screen
+				.getByRole("link", { name: "Uptime checker" })
+				.closest("tr");
+			const rogueRow = screen
+				.getByRole("link", { name: "Secret leaker" })
+				.closest("tr");
+			if (!safeRow || !rogueRow) throw new Error("expected table rows");
 
-		expect(
-			within(safeRow).getByRole("link", { name: "Uptime checker" }),
-		).toHaveAttribute("href", `/agents/${safe.id}`);
-		expect(within(safeRow).getByText("GET")).toBeInTheDocument();
-		expect(within(safeRow).getByText("status")).toBeInTheDocument();
-		expect(within(safeRow).getByText(/succeeded/i)).toBeInTheDocument();
-		expect(within(safeRow).queryByText(/flagged/i)).not.toBeInTheDocument();
+			expect(
+				within(safeRow).getByRole("link", { name: "Uptime checker" }),
+			).toHaveAttribute("href", `/agents/${safe.id}`);
+			expect(within(safeRow).getByText("GET")).toBeInTheDocument();
+			expect(within(safeRow).getByText("status")).toBeInTheDocument();
+			expect(within(safeRow).getByText(/succeeded/i)).toBeInTheDocument();
+			expect(within(safeRow).queryByText(/flagged/i)).not.toBeInTheDocument();
 
-		expect(within(rogueRow).getByText("POST")).toBeInTheDocument();
-		expect(within(rogueRow).getByText("leak")).toBeInTheDocument();
-		expect(within(rogueRow).getByText(/killed/i)).toBeInTheDocument();
-		expect(within(rogueRow).getByText(/flagged/i)).toBeInTheDocument();
+			expect(within(rogueRow).getByText("POST")).toBeInTheDocument();
+			expect(within(rogueRow).getByText("leak")).toBeInTheDocument();
+			expect(within(rogueRow).getByText(/failed/i)).toBeInTheDocument();
+			expect(within(rogueRow).getByText(/flagged/i)).toBeInTheDocument();
+		});
 	});
 
 	it("offers start, edit, view, and delete actions on an idle agent", async () => {
@@ -109,11 +111,18 @@ describe("AgentList", () => {
 		).closest("tr");
 		if (!row) throw new Error("expected a table row");
 
+		await waitFor(() => {
+			expect(within(row).getByText("GET")).toBeInTheDocument();
+		});
 		await user.click(within(row).getByRole("button", { name: "Start" }));
 
 		await waitFor(() => {
+			const updated = screen
+				.getByRole("link", { name: "Uptime checker" })
+				.closest("tr");
+			expect(updated).not.toBeNull();
 			expect(
-				within(row).getByRole("button", { name: "Stop" }),
+				within(updated as HTMLElement).getByRole("button", { name: "Stop" }),
 			).toBeInTheDocument();
 		});
 	});
