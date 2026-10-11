@@ -28,6 +28,16 @@ Status: complete, awaiting commit (2026-10-10)
 - 2026-10-10: `routeTree.gen.ts` regenerated; `fe/README.md` and the dashboard plan's
   layout, architecture, contract and steps updated.
 
+- 2026-10-10 (evening): merged `main`, which meanwhile wired the dashboard to the
+  real connectors and executions API (`spec/2026-10-10-frontend-backend-integration`)
+  on top of the old login/security code. Resolution: the API layer, mock, list and
+  run view were taken from `main` and this cleanup re-applied on top (identity from
+  configuration, no sign-in, no findings/flagged/`security` events, no mock run-time
+  monitor, the Security route and its test deleted again). The mock now keeps
+  `result.tool_calls` when a run completes so the run page's tool-call panel has
+  something to show. Tests from both sides were reconciled (connector ids in
+  `configurations.primitives`, `invalid_connector` errors, `timed_out` status).
+
 ## Decisions
 
 - Identity is a module-level value (`getCurrentUser()`) read from `VITE_DEV_USER_SSO`,

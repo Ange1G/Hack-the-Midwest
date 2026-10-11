@@ -8,9 +8,9 @@ import {
 	isActiveRunStatus,
 	useAgent,
 	useAgents,
+	useConnectors,
 	useCreateAgent,
 	useRun,
-	useRunEvents,
 	useStartRun,
 } from "./queries";
 import { type AgentInput, agentSchema, type RunStatus } from "./schemas";
@@ -33,8 +33,7 @@ describe("isActiveRunStatus", () => {
 		expect(isActiveRunStatus("running")).toBe(true);
 		expect(isActiveRunStatus("succeeded")).toBe(false);
 		expect(isActiveRunStatus("failed")).toBe(false);
-		expect(isActiveRunStatus("killed")).toBe(false);
-		expect(isActiveRunStatus("cancelled")).toBe(false);
+		expect(isActiveRunStatus("timed_out")).toBe(false);
 	});
 });
 
@@ -55,8 +54,11 @@ describe("agent hooks", () => {
 			owner_user_sso: "angel",
 			last_run: null,
 		});
-		expect(created.configurations.primitives.status).toEqual(
-			safeAgentInput.configurations.primitives.status,
+		// The HTTP call became a connector; the agent references it by id.
+		const connectorIds = Object.keys(created.configurations.primitives);
+		expect(connectorIds).toHaveLength(1);
+		expect(created.configurations.primitives[connectorIds[0] ?? ""]).toEqual(
+			{},
 		);
 
 		await waitFor(() =>
@@ -67,9 +69,10 @@ describe("agent hooks", () => {
 		await waitFor(() => expect(byId.result.current.data?.id).toBe(created.id));
 	});
 
-	it("masks credentials in the created agent, like the backend does", async () => {
+	it("masks credentials in the stored connector, like the backend does", async () => {
 		actAs();
-		const created = await createAgent(createQueryWrapper(), {
+		const wrapper = createQueryWrapper();
+		const created = await createAgent(wrapper, {
 			...safeAgentInput,
 			configurations: {
 				...safeAgentInput.configurations,
@@ -82,10 +85,19 @@ describe("agent hooks", () => {
 				},
 			},
 		});
-		const contract = created.configurations.primitives.status;
-		expect(contract?.xApiKey).toBe("********");
-		expect(contract?.authorizationHeader).toBe("********");
+		const connectors = renderHook(() => useConnectors(), { wrapper });
+		await waitFor(() =>
+			expect(connectors.result.current.data?.length).toBeGreaterThan(0),
+		);
+		const stored = connectors.result.current.data?.[0]?.contract as {
+			credentials?: { xApiKey?: string; authorizationHeader?: string };
+		};
+		expect(stored?.credentials?.xApiKey).toBe("********");
+		expect(stored?.credentials?.authorizationHeader).toBe("********");
 		expect(JSON.stringify(created)).not.toContain("key-live-123");
+		expect(JSON.stringify(connectors.result.current.data)).not.toContain(
+			"key-live-123",
+		);
 	});
 
 	it("rejects an unsafe URL with the backend's error shape", async () => {
@@ -113,9 +125,9 @@ describe("agent hooks", () => {
 		await waitFor(() => expect(result.current.isError).toBe(true));
 		expect(result.current.error).toMatchObject({
 			status: 422,
-			code: "invalid_configuration",
+			code: "invalid_connector",
 			fields: {
-				"configurations.primitives.scrape.URL":
+				"config.URL":
 					"Private, loopback and link-local addresses are not allowed",
 			},
 		});
@@ -166,17 +178,8 @@ describe("run hooks", () => {
 			{ timeout: 4000 },
 		);
 		expect(seen).toEqual(["queued", "running", "succeeded"]);
-		expect(poll.result.current.data?.output).toBeTruthy();
-
-		const events = renderHook(
-			() => useRunEvents(run.id, { pollIntervalMs: 5 }),
-			{ wrapper },
-		);
-		await waitFor(() =>
-			expect(events.result.current.data?.length).toBeGreaterThan(1),
-		);
-		const types = events.result.current.data?.map((event) => event.type);
-		expect(types).toEqual(expect.arrayContaining(["tool_call", "tool_result"]));
+		expect(poll.result.current.data?.result?.output).toBeTruthy();
+		expect(poll.result.current.data?.result?.tool_calls).toHaveLength(1);
 
 		const detail = renderHook(() => useAgent(agent.id), { wrapper });
 		await waitFor(() =>

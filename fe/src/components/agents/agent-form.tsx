@@ -1,5 +1,5 @@
 import { useForm } from "@tanstack/react-form";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FieldErrors, fieldErrorMessages } from "#/components/form-field";
 import { Button } from "#/components/ui/button";
 import { Checkbox } from "#/components/ui/checkbox";
@@ -7,13 +7,15 @@ import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { Textarea } from "#/components/ui/textarea";
 import { ApiError } from "#/lib/api/client";
-import { useCreateAgent } from "#/lib/api/queries";
+import { useConnectors, useCreateAgent } from "#/lib/api/queries";
 import {
 	type Agent,
 	type AgentInput,
 	agentInputSchema,
+	type Connector,
 	type HttpContractInput,
 	type HttpMethod,
+	httpContractFromConnector,
 } from "#/lib/api/schemas";
 import {
 	CONTRACT_VERSION,
@@ -78,7 +80,10 @@ const emptyCall = (): CallDraft => ({
 	timeout: "",
 });
 
-function draftsFromAgent(agent: Agent): {
+function draftsFromAgent(
+	agent: Agent,
+	connectors: Connector[],
+): {
 	name: string;
 	instructions: string;
 	calls: CallDraft[];
@@ -86,31 +91,34 @@ function draftsFromAgent(agent: Agent): {
 	times: string;
 	month: string;
 } {
+	const byId = new Map(connectors.map((item) => [item.id, item]));
 	return {
 		name: agent.title,
 		instructions: agent.system_prompt,
-		calls: Object.entries(agent.configurations.primitives).map(
-			([name, contract]) => ({
+		calls: Object.keys(agent.configurations.primitives).map((id) => {
+			const connector = byId.get(id);
+			const contract = connector ? httpContractFromConnector(connector) : null;
+			return {
 				key: nextKey++,
-				name,
-				method: contract.method,
-				url: contract.URL,
+				name: connector?.name ?? id,
+				method: contract?.method ?? "GET",
+				url: contract?.URL ?? "",
 				payload:
-					contract.payload !== undefined
+					contract?.payload !== undefined
 						? JSON.stringify(contract.payload, null, 2)
 						: "",
-				xApiKey: contract.xApiKey ?? "",
-				authorizationHeader: contract.authorizationHeader ?? "",
+				xApiKey: contract?.xApiKey ?? "",
+				authorizationHeader: contract?.authorizationHeader ?? "",
 				retries:
-					contract.options?.retries != null
+					contract?.options?.retries != null
 						? String(contract.options.retries)
 						: "",
 				timeout:
-					contract.options?.timeout != null
+					contract?.options?.timeout != null
 						? String(contract.options.timeout)
 						: "",
-			}),
-		),
+			};
+		}),
 		days: [...agent.configurations.dayOfWeek],
 		times: agent.configurations.timeOfDay.map(minutesToTime).join(", "),
 		month:
@@ -265,12 +273,22 @@ export function AgentForm({
 	readOnly?: boolean;
 }) {
 	const createAgent = useCreateAgent();
-	const initial = agent ? draftsFromAgent(agent) : null;
+	const connectors = useConnectors();
+	const initial = agent ? draftsFromAgent(agent, connectors.data ?? []) : null;
 	const [calls, setCalls] = useState<CallDraft[]>(initial?.calls ?? []);
 	const [days, setDays] = useState<number[]>(initial?.days ?? []);
 	const [times, setTimes] = useState(initial?.times ?? "");
 	const [month, setMonth] = useState(initial?.month ?? "");
 	const [errors, setErrors] = useState<Errors>({});
+
+	useEffect(() => {
+		if (!agent || connectors.isPending) return;
+		const next = draftsFromAgent(agent, connectors.data ?? []);
+		setCalls(next.calls);
+		setDays(next.days);
+		setTimes(next.times);
+		setMonth(next.month);
+	}, [agent, connectors.data, connectors.isPending]);
 
 	const updateCall = (key: number, patch: Partial<CallDraft>) =>
 		setCalls((previous) =>

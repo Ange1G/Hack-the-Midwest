@@ -2,10 +2,15 @@ import type {
 	Agent,
 	AgentConfigurations,
 	AgentInput,
+	Connector,
+	ConnectorCreate,
 	HttpContract,
 	HttpOptions,
 	Run,
-	RunEvent,
+} from "#/lib/api/schemas";
+import {
+	connectorCreateFromHttpCall,
+	httpContractFromConnector,
 } from "#/lib/api/schemas";
 import { CONTRACT_VERSION, SECRET_PLACEHOLDER } from "#/lib/http-contract";
 
@@ -15,8 +20,8 @@ import { CONTRACT_VERSION, SECRET_PLACEHOLDER } from "#/lib/http-contract";
 
 export type MockState = {
 	agents: Agent[];
+	connectors: Connector[];
 	runs: Run[];
-	events: RunEvent[];
 	ticks: Map<string, number>;
 	counter: number;
 };
@@ -24,8 +29,8 @@ export type MockState = {
 function createState(): MockState {
 	return {
 		agents: [],
+		connectors: [],
 		runs: [],
-		events: [],
 		ticks: new Map(),
 		counter: 0,
 	};
@@ -57,32 +62,71 @@ function compactOptions(options: HttpOptions | undefined): HttpOptions | null {
 	return Object.keys(compact).length > 0 ? compact : null;
 }
 
-// Stores a contract the way the backend does: credentials replaced by the
-// placeholder (the real server encrypts them into a separate table) and unset
-// fields omitted.
-function storedContract(
-	contract: AgentInput["configurations"]["primitives"][string],
-): HttpContract {
-	const options = compactOptions(contract.options);
+// Stores a connector the way the backend does: credentials replaced by the
+// placeholder (the real server encrypts them) and unset fields omitted.
+function storedHttpContract(body: ConnectorCreate): Connector["contract"] {
+	const credentials: Record<string, string> = {};
+	if (body.credentials?.xApiKey) credentials.xApiKey = SECRET_PLACEHOLDER;
+	if (body.credentials?.authorizationHeader) {
+		credentials.authorizationHeader = SECRET_PLACEHOLDER;
+	}
+	const options = compactOptions(body.options ?? undefined);
 	return {
+		type: "http",
 		contractVersion: CONTRACT_VERSION,
-		method: contract.method,
-		URL: contract.URL,
-		...(contract.payload !== undefined ? { payload: contract.payload } : {}),
-		...(contract.xApiKey ? { xApiKey: SECRET_PLACEHOLDER } : {}),
-		...(contract.authorizationHeader
-			? { authorizationHeader: SECRET_PLACEHOLDER }
-			: {}),
+		name: body.name,
+		config: {
+			method: body.config.method,
+			URL: body.config.URL,
+			...(body.config.payload !== undefined
+				? { payload: body.config.payload }
+				: {}),
+		},
+		...(Object.keys(credentials).length > 0 ? { credentials } : {}),
 		...(options ? { options } : {}),
 	};
 }
 
+export function createConnector(
+	owner_user_sso: string,
+	body: ConnectorCreate,
+): Connector {
+	const taken = mockState.connectors.some(
+		(item) => item.owner_user_sso === owner_user_sso && item.name === body.name,
+	);
+	if (taken) {
+		const error = new Error("connector_name_taken") as Error & {
+			code: string;
+		};
+		error.code = "connector_name_taken";
+		throw error;
+	}
+	const timestamp = now();
+	const connector: Connector = {
+		id: nextId("con"),
+		owner_user_sso,
+		type: body.type,
+		name: body.name,
+		contract: storedHttpContract(body),
+		created_at: timestamp,
+		updated_at: timestamp,
+	};
+	mockState.connectors.push(connector);
+	return connector;
+}
+
+// Creates a connector for each HTTP call, then the agent that references them
+// by id, like the backend.
 export function createAgent(owner_user_sso: string, input: AgentInput): Agent {
-	const primitives: Record<string, HttpContract> = {};
+	const primitives: AgentConfigurations["primitives"] = {};
 	for (const [name, contract] of Object.entries(
 		input.configurations.primitives,
 	)) {
-		primitives[name] = storedContract(contract);
+		const connector = createConnector(
+			owner_user_sso,
+			connectorCreateFromHttpCall(name, contract),
+		);
+		primitives[connector.id] = {};
 	}
 	const configurations: AgentConfigurations = {
 		primitives,
@@ -110,22 +154,20 @@ export function createAgent(owner_user_sso: string, input: AgentInput): Agent {
 	return agent;
 }
 
-export function pushEvent(
-	run: Run,
-	type: RunEvent["type"],
-	message: string,
-	data: RunEvent["data"] = null,
-): RunEvent {
-	const event: RunEvent = {
-		id: nextId("evt"),
-		run_id: run.id,
-		ts: now(),
-		type,
-		message,
-		data,
-	};
-	mockState.events.push(event);
-	return event;
+export function httpCallsForAgent(
+	agent: Agent,
+): Array<{ id: string; name: string; contract: HttpContract }> {
+	const calls: Array<{ id: string; name: string; contract: HttpContract }> = [];
+	for (const id of Object.keys(agent.configurations.primitives)) {
+		const connector = mockState.connectors.find(
+			(item) => item.id === id && item.owner_user_sso === agent.owner_user_sso,
+		);
+		if (!connector) continue;
+		const contract = httpContractFromConnector(connector);
+		if (!contract) continue;
+		calls.push({ id, name: connector.name, contract });
+	}
+	return calls;
 }
 
 function syncLastRun(agent: Agent, run: Run): void {
@@ -138,13 +180,18 @@ function syncLastRun(agent: Agent, run: Run): void {
 }
 
 export function createRun(agent: Agent): Run {
+	const timestamp = now();
 	const run: Run = {
 		id: nextId("run"),
 		agent_id: agent.id,
+		owner_user_sso: agent.owner_user_sso,
 		status: "queued",
-		output: null,
-		error: null,
-		created_at: now(),
+		result: null,
+		error_code: null,
+		error_message: null,
+		runner_meta: null,
+		created_at: timestamp,
+		updated_at: timestamp,
 		started_at: null,
 		finished_at: null,
 	};
@@ -162,9 +209,10 @@ export function runToCompletion(run: Run): void {
 
 function finish(run: Run, agent: Agent, output: string): void {
 	run.status = "succeeded";
-	run.output = output;
+	// Keeps the tool calls recorded earlier in the run.
+	run.result = { ...run.result, output, model: "mock" };
 	run.finished_at = now();
-	pushEvent(run, "log", "Run finished");
+	run.updated_at = run.finished_at;
 	syncLastRun(agent, run);
 }
 
@@ -181,13 +229,12 @@ export function advanceRun(run: Run): void {
 	if (run.status === "queued") {
 		run.status = "running";
 		run.started_at = now();
-		pushEvent(run, "log", `Agent "${agent.title}" started`);
-		pushEvent(run, "log", "Reading instructions and selecting HTTP calls");
+		run.updated_at = run.started_at;
 		syncLastRun(agent, run);
 		return;
 	}
 
-	const calls = Object.entries(agent.configurations.primitives);
+	const calls = httpCallsForAgent(agent);
 	if (tick === 2) {
 		const first = calls[0];
 		if (!first) {
@@ -198,15 +245,14 @@ export function advanceRun(run: Run): void {
 			);
 			return;
 		}
-		const [name, contract] = first;
-		pushEvent(run, "tool_call", `${contract.method} ${contract.URL}`, {
-			primitive: name,
-			method: contract.method,
-		});
-		pushEvent(run, "tool_result", `${name} returned 200 OK`, {
-			status: 200,
-			bytes: 1284,
-		});
+		const { name, contract } = first;
+		run.result = {
+			output: null,
+			tool_calls: [
+				{ name, method: contract.method, URL: contract.URL, status: 200 },
+			],
+		};
+		run.updated_at = now();
 		return;
 	}
 

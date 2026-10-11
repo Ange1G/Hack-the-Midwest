@@ -111,10 +111,15 @@ describe("AgentForm", () => {
 		actAs();
 		const user = userEvent.setup();
 		const onCreated = vi.fn();
-		let sent: unknown;
+		let sentAgent: unknown;
+		let sentConnector: unknown;
 		server.events.on("request:start", async ({ request }) => {
-			if (request.method === "POST" && request.url.includes("/agents/")) {
-				sent = await request.clone().json();
+			if (request.method !== "POST") return;
+			if (request.url.includes("/connectors/")) {
+				sentConnector = await request.clone().json();
+			}
+			if (request.url.includes("/agents/")) {
+				sentAgent = await request.clone().json();
 			}
 		});
 		renderWithProviders(<AgentForm onCreated={onCreated} />);
@@ -142,27 +147,34 @@ describe("AgentForm", () => {
 				expect.objectContaining({ title: "Weekday GitHub digest" }),
 			),
 		);
-		expect(sent).toEqual({
+		expect(sentConnector).toEqual({
+			type: "http",
+			contractVersion: 1,
+			name: "list_issues",
+			config: {
+				method: "GET",
+				URL: "https://api.github.com/repos/acme/web/issues",
+			},
+			credentials: { xApiKey: "key-live-123" },
+			options: { retries: 3, timeout: 10000 },
+		});
+		expect(sentAgent).toEqual({
 			agentTitle: "Weekday GitHub digest",
 			systemPrompt: "Summarize yesterday's new issues.",
 			configurations: {
-				primitives: {
-					list_issues: {
-						contractVersion: 1,
-						method: "GET",
-						URL: "https://api.github.com/repos/acme/web/issues",
-						xApiKey: "key-live-123",
-						options: { retries: 3, timeout: 10000 },
-					},
-				},
+				primitives: expect.any(Object),
 				dayOfWeek: [1, 2, 3, 4, 5],
 				timeOfDay: [540],
 			},
 		});
+		const primitives = (
+			sentAgent as {
+				configurations: { primitives: Record<string, unknown> };
+			}
+		).configurations.primitives;
+		expect(Object.values(primitives)).toEqual([{}]);
 		const created = onCreated.mock.calls[0]?.[0];
-		expect(created.configurations.primitives.list_issues.xApiKey).toBe(
-			"********",
-		);
+		expect(Object.values(created.configurations.primitives)).toEqual([{}]);
 	});
 
 	it("shows a server-side configuration error on the call it belongs to", async () => {
@@ -224,7 +236,9 @@ describe("AgentForm", () => {
 		);
 		expect(screen.getByLabelText(/^name$/i)).toBeDisabled();
 		expect(screen.getByLabelText(/^instructions$/i)).toBeDisabled();
-		expect(screen.getByLabelText(/call name/i)).toHaveValue("status");
+		await waitFor(() =>
+			expect(screen.getByLabelText(/call name/i)).toHaveValue("status"),
+		);
 		expect(screen.getByLabelText(/call name/i)).toBeDisabled();
 		expect(screen.queryByRole("button", { name: /add http call/i })).toBeNull();
 		expect(

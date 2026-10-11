@@ -77,21 +77,22 @@ Defer nonessential integrations, advanced orchestration, complex scheduling, and
 ## Roadmap
 
 - [x] Scaffold project.
-- [ ] Build the MVP frontend before polishing.
-  - [ ] Build feature-by-feature, starting off with the foundations.
-    - [ ] Build the base layout for a dashboard for users to create agents.
-    - [ ] Build the overall components needed for final product.
-- [ ] Build the MVP API before polishing.
-- [ ] Build the MVP backend and execution infrastructure before polishing.
-- [ ] Implement agent creation and configuration persistence.
-- [ ] Implement the first tool primitives: HTTP.GET and HTTP.POST.
-- [ ] Implement asynchronous task submission and worker execution.
-- [ ] Implement task status, results, error handling, and execution history.
-- [ ] Implement baseline execution limits and security controls.
+- [x] Build the MVP API before polishing.
+- [x] Build the MVP backend and execution infrastructure before polishing.
+- [x] Implement agent creation and configuration persistence.
+- [x] Implement the first tool primitives: HTTP.GET and HTTP.POST.
+- [x] Implement asynchronous task submission and worker execution.
+- [x] Implement task status, results, error handling, and execution history.
+- [x] Implement baseline execution limits and security controls.
+- [x] Build the MVP frontend before polishing (dashboard on `fe/`; wired to executions and connectors API).
+  - [x] Base layout: developer identity (X-Dev-User-SSO), agents list, agent detail, run view.
+  - [x] Create agent with HTTP primitives (UI creates connectors, then agent with UUID references).
+  - [x] Start execution and poll `/executions` for status, `result.output`, and errors.
+  - [ ] Agent edit/save, production auth, and security findings UI (removed until the backend produces findings).
+- [ ] Implement authentication and user-level resource isolation.
 - [ ] Implement background monitoring and policy-violation reporting.
 - [ ] Add end-to-end tests for the primary user workflow.
 - [ ] Validate reliability, security, and deployment procedures.
-- [ ] Implement authentication and user-level resource isolation.
 - [ ] Polish the UI and improve developer experience.
 - [ ] Expand connectors, scheduling, observability, and agent capabilities.
 
@@ -196,7 +197,7 @@ Database schema changes must be managed through migrations. Never rely on automa
 
 Use a durable task queue and independently running workers.
 
-The specific queue, broker, and result-persistence technology must be selected and documented before implementing production execution infrastructure. Do not assume that an in-memory queue is sufficient for durable workloads.
+The MVP execution queue uses PostgreSQL `SELECT … FOR UPDATE SKIP LOCKED`. This is sufficient for single-worker development and early validation but must be replaced with a durable message broker (e.g. Redis + Celery, or a managed queue) before running multiple workers in production. The broker technology must be selected and documented before scaling execution infrastructure. Do not assume the PostgreSQL queue is sufficient for concurrent or fault-tolerant production workloads.
 
 ### Infrastructure and tooling
 

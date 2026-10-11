@@ -25,3 +25,18 @@ def test_wrong_key_cannot_decrypt() -> None:
 def test_invalid_key_is_rejected_at_construction() -> None:
     with pytest.raises(ValueError):
         SecretCipher("not-a-valid-key")
+
+
+def test_derived_secret_is_stable_per_key_and_context() -> None:
+    key = SecretCipher.generate_key()
+    a, b = SecretCipher(key), SecretCipher(key)
+    assert a.derive_secret("db:agent-1:conn-1") == b.derive_secret("db:agent-1:conn-1")
+    assert a.derive_secret("db:agent-1:conn-1") != a.derive_secret("db:agent-1:conn-2")
+    other = SecretCipher(SecretCipher.generate_key())
+    assert other.derive_secret("db:agent-1:conn-1") != a.derive_secret("db:agent-1:conn-1")
+
+
+def test_derived_secret_is_url_and_env_safe() -> None:
+    secret = SecretCipher(SecretCipher.generate_key()).derive_secret("x")
+    assert len(secret) == 43
+    assert secret.replace("-", "").replace("_", "").isalnum()

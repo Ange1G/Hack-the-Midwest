@@ -6,8 +6,7 @@ const presentation: Record<RunStatus, { label: string; tone: Tone }> = {
 	running: { label: "Running", tone: "info" },
 	succeeded: { label: "Succeeded", tone: "success" },
 	failed: { label: "Failed", tone: "danger" },
-	killed: { label: "Killed", tone: "danger" },
-	cancelled: { label: "Cancelled", tone: "neutral" },
+	timed_out: { label: "Timed out", tone: "danger" },
 };
 
 export function statusLabel(status: RunStatus): string {

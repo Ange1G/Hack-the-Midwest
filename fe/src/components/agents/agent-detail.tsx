@@ -18,9 +18,11 @@ import {
 	isActiveRunStatus,
 	useAgent,
 	useAgentRuns,
+	useConnectors,
 	useStartRun,
 } from "#/lib/api/queries";
 import type { AgentConfigurations, HttpContract, Run } from "#/lib/api/schemas";
+import { httpContractFromConnector } from "#/lib/api/schemas";
 import { formatDateTime, formatDuration } from "#/lib/format";
 import { minutesToTime } from "#/lib/http-contract";
 
@@ -53,6 +55,7 @@ export function AgentDetail({
 	onRunStarted: (run: Run) => void;
 }) {
 	const agent = useAgent(agentId);
+	const connectors = useConnectors();
 	const startRun = useStartRun(agentId);
 
 	if (agent.isPending) {
@@ -69,7 +72,16 @@ export function AgentDetail({
 	}
 
 	const data = agent.data;
-	const calls = Object.entries(data.configurations.primitives);
+	const connectorById = new Map(
+		(connectors.data ?? []).map((item) => [item.id, item]),
+	);
+	const calls = Object.keys(data.configurations.primitives).flatMap((id) => {
+		const connector = connectorById.get(id);
+		if (!connector) return [];
+		const contract = httpContractFromConnector(connector);
+		if (!contract) return [];
+		return [{ id, name: connector.name, contract }];
+	});
 
 	return (
 		<>
@@ -128,9 +140,9 @@ export function AgentDetail({
 								</p>
 							) : (
 								<ul className="space-y-4">
-									{calls.map(([name, contract]) => (
-										<li key={name}>
-											<CallSummary name={name} contract={contract} />
+									{calls.map((call) => (
+										<li key={call.id}>
+											<CallSummary name={call.name} contract={call.contract} />
 										</li>
 									))}
 								</ul>

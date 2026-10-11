@@ -74,24 +74,101 @@ export const httpContractSchema = z.object({
 });
 export type HttpContract = z.infer<typeof httpContractSchema>;
 
-// Runs
+// Executions (backend: AgentExecution / ExecutionRead)
 
-export const runStatusSchema = z.enum([
+export const executionStatusSchema = z.enum([
 	"queued",
 	"running",
 	"succeeded",
 	"failed",
-	"killed",
-	"cancelled",
+	"timed_out",
 ]);
-export type RunStatus = z.infer<typeof runStatusSchema>;
+export type ExecutionStatus = z.infer<typeof executionStatusSchema>;
+/** @deprecated Use ExecutionStatus. Kept so existing UI names still compile. */
+export type RunStatus = ExecutionStatus;
+export const runStatusSchema = executionStatusSchema;
+
+export const executionResultSchema = z.object({
+	output: z.string().nullable().optional(),
+	model: z.string().nullable().optional(),
+	tool_calls: z.array(z.unknown()).nullable().optional(),
+});
+export type ExecutionResult = z.infer<typeof executionResultSchema>;
+
+export const executionSchema = z.object({
+	id: z.string(),
+	agent_id: z.string(),
+	owner_user_sso: z.string(),
+	status: executionStatusSchema,
+	result: executionResultSchema.nullable(),
+	error_code: z.string().nullable(),
+	error_message: z.string().nullable(),
+	runner_meta: z.record(z.string(), z.unknown()).nullable(),
+	started_at: z.string().nullable(),
+	finished_at: z.string().nullable(),
+	created_at: z.string(),
+	updated_at: z.string(),
+});
+export type Execution = z.infer<typeof executionSchema>;
+/** @deprecated Use Execution. */
+export type Run = Execution;
+export const runSchema = executionSchema;
 
 export const runSummarySchema = z.object({
 	id: z.string(),
-	status: runStatusSchema,
+	status: executionStatusSchema,
 	created_at: z.string(),
 });
 export type RunSummary = z.infer<typeof runSummarySchema>;
+
+// Connectors (backend: ConnectorRead)
+
+export const connectorTypeSchema = z.enum(["http", "mcp"]);
+export type ConnectorType = z.infer<typeof connectorTypeSchema>;
+
+export const connectorReferenceSchema = z
+	.object({
+		allowedTools: z.array(z.string()).min(1).optional(),
+	})
+	.passthrough();
+export type ConnectorReference = z.infer<typeof connectorReferenceSchema>;
+
+export const connectorSchema = z.object({
+	id: z.string(),
+	owner_user_sso: z.string(),
+	type: z.string(),
+	name: z.string(),
+	contract: z.record(z.string(), z.unknown()),
+	created_at: z.string(),
+	updated_at: z.string(),
+});
+export type Connector = z.infer<typeof connectorSchema>;
+
+export const connectorCreateSchema = z.object({
+	type: z.literal("http"),
+	contractVersion: z.literal(CONTRACT_VERSION),
+	name: z.string().regex(PRIMITIVE_NAME_PATTERN, PRIMITIVE_NAME_MESSAGE),
+	description: z.string().optional(),
+	config: z.object({
+		method: httpMethodSchema,
+		URL: z
+			.string()
+			.min(1, "URL is required")
+			.superRefine((value, ctx) => {
+				const reason = unsafeUrlReason(value);
+				if (reason) ctx.addIssue({ code: "custom", message: reason });
+			}),
+		payload: z.unknown().optional(),
+	}),
+	credentials: z
+		.object({
+			xApiKey: z.string().optional(),
+			authorizationHeader: z.string().optional(),
+		})
+		.optional(),
+	options: httpOptionsSchema.optional(),
+});
+export type ConnectorCreate = z.infer<typeof connectorCreateSchema>;
 
 // Agents (AgentRead in the backend)
 
@@ -99,7 +176,7 @@ export type RunSummary = z.infer<typeof runSummarySchema>;
 // renders with no calls and no schedule rather than failing the whole list.
 export const agentConfigurationsSchema = z
 	.object({
-		primitives: z.record(z.string(), httpContractSchema).catch({}),
+		primitives: z.record(z.string(), connectorReferenceSchema).catch({}),
 		month: z
 			.number()
 			.int()
@@ -262,24 +339,63 @@ export const agentInputSchema = z.object({
 });
 export type AgentInput = z.infer<typeof agentInputSchema>;
 
-export const runSchema = z.object({
-	id: z.string(),
-	agent_id: z.string(),
-	status: runStatusSchema,
-	output: z.string().nullable(),
-	error: z.string().nullable(),
-	created_at: z.string(),
-	started_at: z.string().nullable(),
-	finished_at: z.string().nullable(),
-});
-export type Run = z.infer<typeof runSchema>;
+/** Map a stored HTTP connector onto the display shape the UI already uses. */
+export function httpContractFromConnector(
+	connector: Connector,
+): HttpContract | null {
+	if (connector.type !== "http") return null;
+	const contract = connector.contract;
+	const config =
+		contract.config && typeof contract.config === "object"
+			? (contract.config as Record<string, unknown>)
+			: {};
+	const credentials =
+		contract.credentials && typeof contract.credentials === "object"
+			? (contract.credentials as Record<string, unknown>)
+			: {};
+	const options =
+		contract.options && typeof contract.options === "object"
+			? (contract.options as Record<string, unknown>)
+			: null;
+	const method = config.method === "POST" ? "POST" : "GET";
+	const URL = typeof config.URL === "string" ? config.URL : "";
+	const parsedOptions = httpOptionsSchema.nullable().safeParse(options);
+	return {
+		contractVersion: CONTRACT_VERSION,
+		method,
+		URL,
+		...(config.payload !== undefined ? { payload: config.payload } : {}),
+		...(typeof credentials.xApiKey === "string"
+			? { xApiKey: credentials.xApiKey }
+			: {}),
+		...(typeof credentials.authorizationHeader === "string"
+			? { authorizationHeader: credentials.authorizationHeader }
+			: {}),
+		...(parsedOptions.success && parsedOptions.data
+			? { options: parsedOptions.data }
+			: {}),
+	};
+}
 
-export const runEventSchema = z.object({
-	id: z.string(),
-	run_id: z.string(),
-	ts: z.string(),
-	type: z.enum(["log", "tool_call", "tool_result"]),
-	message: z.string(),
-	data: z.record(z.string(), z.unknown()).nullable(),
-});
-export type RunEvent = z.infer<typeof runEventSchema>;
+export function connectorCreateFromHttpCall(
+	name: string,
+	contract: HttpContractInput,
+): ConnectorCreate {
+	const credentials: ConnectorCreate["credentials"] = {};
+	if (contract.xApiKey) credentials.xApiKey = contract.xApiKey;
+	if (contract.authorizationHeader) {
+		credentials.authorizationHeader = contract.authorizationHeader;
+	}
+	return {
+		type: "http",
+		contractVersion: CONTRACT_VERSION,
+		name,
+		config: {
+			method: contract.method,
+			URL: contract.URL,
+			...(contract.payload !== undefined ? { payload: contract.payload } : {}),
+		},
+		...(Object.keys(credentials).length > 0 ? { credentials } : {}),
+		...(contract.options ? { options: contract.options } : {}),
+	};
+}

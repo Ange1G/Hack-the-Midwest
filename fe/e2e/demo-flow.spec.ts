@@ -36,7 +36,6 @@ test("open the dashboard, build an agent, run it, and see an unsafe agent refuse
 		timeout: 15_000,
 	});
 	await expect(page.getByText(/all checks passed/)).toBeVisible();
-	await expect(page.getByText(/Agent "Status check" started/)).toBeVisible();
 
 	// An agent that reaches for the cloud metadata endpoint is refused at save
 	// time, exactly as the backend refuses it.

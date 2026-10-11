@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import APIRouter, Depends, Query
 
 from app.core.auth import CurrentUser
@@ -8,9 +10,9 @@ from app.domains.agents.controller import AgentsController
 from app.domains.agents.schemas import AgentRead
 from fastapi import status
 
-from app.api.deps import get_secret_cipher
-from app.core.secrets import SecretCipher
+from app.api.deps import get_connector_repository
 from app.domains.agents.schemas import AgentCreate
+from app.domains.connectors.repository import SqlAlchemyConnectorRepository
 
 router = APIRouter()
 
@@ -33,12 +35,22 @@ async def list_agents_by_user_sso(
     )
 
 
+@router.get("/{user_sso}/{agent_id}")
+async def get_agent(
+    user_sso: str,
+    agent_id: uuid.UUID,
+    controller: AgentsController = Depends(get_agents_controller),
+    caller: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope[AgentRead]:
+    return await controller.get(user_sso, agent_id, caller=caller)
+
+
 @router.post("/{user_sso}", status_code=status.HTTP_201_CREATED)
 async def create_agent(
     user_sso: str,
     body: AgentCreate,
     controller: AgentsController = Depends(get_agents_controller),
     caller: CurrentUser = Depends(get_current_user),
-    cipher: SecretCipher | None = Depends(get_secret_cipher),
+    connectors: SqlAlchemyConnectorRepository = Depends(get_connector_repository),
 ) -> ApiEnvelope[AgentRead]:
-    return await controller.create(user_sso, body, caller=caller, cipher=cipher)
+    return await controller.create(user_sso, body, caller=caller, connectors=connectors)

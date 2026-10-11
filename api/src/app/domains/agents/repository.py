@@ -1,3 +1,4 @@
+import uuid
 from typing import Protocol
 
 from sqlalchemy import func, select
@@ -5,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.pagination import offset_for_page
 from app.domains.agents.models import Agent
-from app.domains.agents.models import AgentSecret
 
 
 class AgentRepository(Protocol):
@@ -17,7 +17,9 @@ class AgentRepository(Protocol):
         page_size: int,
     ) -> tuple[list[Agent], int]: ...
 
-    async def create(self, agent: Agent, secrets: list[AgentSecret]) -> Agent: ...
+    async def create(self, agent: Agent) -> Agent: ...
+
+    async def get_owned(self, owner_user_sso: str, agent_id: uuid.UUID) -> Agent | None: ...
 
 
 class SqlAlchemyAgentRepository:
@@ -56,13 +58,14 @@ class SqlAlchemyAgentRepository:
         await self._session.flush()
         return agent
 
-    async def create(self, agent: Agent, secrets: list[AgentSecret]) -> Agent:
-        """Persist an agent and its encrypted credentials in one transaction."""
+    async def create(self, agent: Agent) -> Agent:
         self._session.add(agent)
-        await self._session.flush()  # assigns agent.id
-        for secret in secrets:
-            secret.agent_id = agent.id
-            self._session.add(secret)
         await self._session.commit()
         await self._session.refresh(agent)  # load server-side timestamps
         return agent
+
+    async def get_owned(self, owner_user_sso: str, agent_id: uuid.UUID) -> Agent | None:
+        result = await self._session.execute(
+            select(Agent).where(Agent.id == agent_id, Agent.owner_user_sso == owner_user_sso)
+        )
+        return result.scalar_one_or_none()

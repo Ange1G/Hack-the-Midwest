@@ -7,7 +7,7 @@ import { renderWithProviders } from "#/test/render";
 import { RunView } from "./run-view";
 
 describe("RunView", () => {
-	it("polls a run from queued to succeeded and shows its output and events", async () => {
+	it("polls a run from queued to succeeded and shows its output and tool calls", async () => {
 		const owner = actAs();
 		const agent = createAgent(owner.user_sso, safeAgentInput);
 		const run = createRun(agent);
@@ -25,12 +25,7 @@ describe("RunView", () => {
 		).toBeInTheDocument();
 		expect(await screen.findByText(/all checks passed/i)).toBeInTheDocument();
 		expect(
-			await screen.findByText(/agent "uptime checker" started/i),
-		).toBeInTheDocument();
-		expect(
-			screen.getByText(
-				/GET https:\/\/status\.example\.com\/api\/v2\/status\.json/,
-			),
+			screen.getByText(/status\.example\.com\/api\/v2\/status\.json/),
 		).toBeInTheDocument();
 		expect(
 			await screen.findByRole("heading", { name: /uptime checker/i }),

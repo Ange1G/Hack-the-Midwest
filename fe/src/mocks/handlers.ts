@@ -3,15 +3,20 @@ import type { z } from "zod";
 import { API_BASE_URL, DEV_USER_HEADER } from "#/lib/api/client";
 import {
 	type Agent,
+	type AgentConfigurations,
 	agentInputSchema,
+	connectorCreateSchema,
 	type Pagination,
 	type Run,
 } from "#/lib/api/schemas";
-import { advanceRun, createAgent, createRun, mockState, now } from "./state";
-
-// Mirrors the backend (envelope, /api/v1, X-Dev-User-SSO, pagination, error
-// codes, credential masking) for the endpoints it implements, and extends it
-// with the endpoints proposed in spec/2026-10-10-frontend-dashboard/plan.md.
+import {
+	advanceRun,
+	createAgent,
+	createConnector,
+	createRun,
+	mockState,
+	now,
+} from "./state";
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
@@ -66,23 +71,12 @@ const forbidden = () =>
 	fail(403, "forbidden", "You may not access agents for another user");
 const notFound = () => fail(404, "not_found", "Not found.");
 
-// FastAPI's request validation shape: pydantic issues with loc and msg.
 function requestValidationError(issues: z.core.$ZodIssue[]) {
 	return fail(422, "validation_error", "Request validation failed", {
 		errors: issues.map((issue) => ({
 			loc: ["body", ...issue.path.map(String)],
 			msg: issue.message,
 			type: issue.code,
-		})),
-	});
-}
-
-// The agent service's shape: field path and message, never the value.
-function configurationError(issues: z.core.$ZodIssue[]) {
-	return fail(422, "invalid_configuration", "Agent configuration is invalid", {
-		errors: issues.map((issue) => ({
-			field: issue.path.map(String).join("."),
-			message: issue.message,
 		})),
 	});
 }
@@ -112,6 +106,21 @@ function paginate<T>(
 	};
 }
 
+function withLastRun(agent: Agent): Agent {
+	const latest = newestFirst(
+		mockState.runs.filter((run) => run.agent_id === agent.id),
+	)[0];
+	if (!latest) return agent;
+	return {
+		...agent,
+		last_run: {
+			id: latest.id,
+			status: latest.status,
+			created_at: latest.created_at,
+		},
+	};
+}
+
 function ownAgent(owner: string, id: string): Agent | undefined {
 	return mockState.agents.find(
 		(agent) => agent.id === id && agent.owner_user_sso === owner,
@@ -128,43 +137,96 @@ const newestFirst = <T extends { created_at: string }>(items: T[]) =>
 	items.slice().sort((a, b) => b.created_at.localeCompare(a.created_at));
 
 export const handlers = [
-	// Implemented in the backend.
 	http.get(url("/agents/:sso"), ({ request, params }) => {
 		const owner = caller(request);
 		if (!owner) return unauthorized();
 		if (owner !== String(params.sso)) return forbidden();
 		const items = newestFirst(
-			mockState.agents.filter((agent) => agent.owner_user_sso === owner),
+			mockState.agents
+				.filter((agent) => agent.owner_user_sso === owner)
+				.map((agent) => withLastRun(agent)),
 		);
 		const page = paginate(items, request);
 		return ok(page.data, { pagination: page.pagination });
 	}),
 
-	// Implemented in the backend (feat/agent_create_http).
 	http.post(url("/agents/:sso"), async ({ request, params }) => {
 		const owner = caller(request);
 		if (!owner) return unauthorized();
 		if (owner !== String(params.sso)) return forbidden();
-		const parsed = agentInputSchema.safeParse(await request.json());
-		if (!parsed.success) {
-			const issues = parsed.error.issues;
-			const bodyIssues = issues.filter(
-				(issue) => issue.path[0] !== "configurations",
-			);
-			return bodyIssues.length > 0
-				? requestValidationError(bodyIssues)
-				: configurationError(issues);
+		const raw = await request.json();
+		const asForm = agentInputSchema.safeParse(raw);
+		if (asForm.success) {
+			return ok(createAgent(owner, asForm.data), { status: 201 });
 		}
-		return ok(createAgent(owner, parsed.data), { status: 201 });
+		const body = raw as {
+			agentTitle?: string;
+			systemPrompt?: string;
+			configurations?: {
+				primitives?: AgentConfigurations["primitives"];
+				month?: number | null;
+				dayOfWeek?: number[];
+				timeOfDay?: number[];
+			};
+		};
+		if (!body?.agentTitle?.trim() || !body?.systemPrompt?.trim()) {
+			return requestValidationError(asForm.error.issues);
+		}
+		const timestamp = now();
+		const agent: Agent = {
+			id: `agt_${++mockState.counter}`,
+			title: body.agentTitle.trim(),
+			system_prompt: body.systemPrompt.trim(),
+			configurations: {
+				primitives: body.configurations?.primitives ?? {},
+				...(body.configurations?.month != null
+					? { month: body.configurations.month }
+					: {}),
+				dayOfWeek: body.configurations?.dayOfWeek ?? [],
+				timeOfDay: body.configurations?.timeOfDay ?? [],
+			},
+			schedule_month: null,
+			schedule_day: null,
+			schedule_time: null,
+			owner_user_sso: owner,
+			created_at: timestamp,
+			updated_at: timestamp,
+			last_run: null,
+		};
+		mockState.agents.push(agent);
+		return ok(agent, { status: 201 });
 	}),
 
-	// Proposed.
+	http.get(url("/agents/:sso/executions"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const items = newestFirst(
+			mockState.runs.filter((run) => {
+				const agent = ownAgent(owner, run.agent_id);
+				return agent !== undefined;
+			}),
+		);
+		const page = paginate(items, request);
+		return ok(page.data, { pagination: page.pagination });
+	}),
+
+	http.get(url("/agents/:sso/executions/:id"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const run = ownRun(owner, String(params.id));
+		if (!run) return notFound();
+		advanceRun(run);
+		return ok(run);
+	}),
+
 	http.get(url("/agents/:sso/:id"), ({ request, params }) => {
 		const owner = caller(request);
 		if (!owner) return unauthorized();
 		if (owner !== String(params.sso)) return forbidden();
 		const agent = ownAgent(owner, String(params.id));
-		return agent ? ok(agent) : notFound();
+		return agent ? ok(withLastRun(agent)) : notFound();
 	}),
 
 	http.delete(url("/agents/:sso/:id"), ({ request, params }) => {
@@ -177,20 +239,7 @@ export const handlers = [
 		return new HttpResponse(null, { status: 204 });
 	}),
 
-	http.get(url("/agents/:sso/:id/runs"), ({ request, params }) => {
-		const owner = caller(request);
-		if (!owner) return unauthorized();
-		if (owner !== String(params.sso)) return forbidden();
-		const agent = ownAgent(owner, String(params.id));
-		if (!agent) return notFound();
-		const items = newestFirst(
-			mockState.runs.filter((run) => run.agent_id === agent.id),
-		);
-		const page = paginate(items, request);
-		return ok(page.data, { pagination: page.pagination });
-	}),
-
-	http.post(url("/agents/:sso/:id/runs"), ({ request, params }) => {
+	http.post(url("/agents/:sso/:id/executions"), ({ request, params }) => {
 		const owner = caller(request);
 		if (!owner) return unauthorized();
 		if (owner !== String(params.sso)) return forbidden();
@@ -199,32 +248,45 @@ export const handlers = [
 		return ok(createRun(agent), { status: 202 });
 	}),
 
-	http.get(url("/runs/:id"), ({ request, params }) => {
+	http.get(url("/connectors/:sso"), ({ request, params }) => {
 		const owner = caller(request);
 		if (!owner) return unauthorized();
-		const run = ownRun(owner, String(params.id));
-		if (!run) return notFound();
-		advanceRun(run);
-		return ok(run);
+		if (owner !== String(params.sso)) return forbidden();
+		const items = newestFirst(
+			mockState.connectors.filter((item) => item.owner_user_sso === owner),
+		);
+		const page = paginate(items, request);
+		return ok(page.data, { pagination: page.pagination });
 	}),
 
-	http.get(url("/runs/:id/events"), ({ request, params }) => {
+	http.post(url("/connectors/:sso"), async ({ request, params }) => {
 		const owner = caller(request);
 		if (!owner) return unauthorized();
-		const run = ownRun(owner, String(params.id));
-		if (!run) return notFound();
-		return ok(mockState.events.filter((event) => event.run_id === run.id));
-	}),
-
-	http.post(url("/runs/:id/cancel"), ({ request, params }) => {
-		const owner = caller(request);
-		if (!owner) return unauthorized();
-		const run = ownRun(owner, String(params.id));
-		if (!run) return notFound();
-		if (run.status === "queued" || run.status === "running") {
-			run.status = "cancelled";
-			run.finished_at = now();
+		if (owner !== String(params.sso)) return forbidden();
+		const parsed = connectorCreateSchema.safeParse(await request.json());
+		if (!parsed.success) {
+			return fail(422, "invalid_connector", "Connector contract is invalid", {
+				errors: parsed.error.issues.map((issue) => ({
+					field: issue.path.map(String).join("."),
+					message: issue.message,
+				})),
+			});
 		}
-		return ok(run);
+		try {
+			return ok(createConnector(owner, parsed.data), { status: 201 });
+		} catch (error) {
+			if (
+				error instanceof Error &&
+				"code" in error &&
+				error.code === "connector_name_taken"
+			) {
+				return fail(
+					409,
+					"connector_name_taken",
+					`You already have a connector named '${parsed.data.name}'`,
+				);
+			}
+			throw error;
+		}
 	}),
 ];

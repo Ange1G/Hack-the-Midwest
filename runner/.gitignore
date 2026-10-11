@@ -1,0 +1,4 @@
+# CA bundles — never commit host certificates or personal trust stores
+*.pem
+*.crt
+*.cer

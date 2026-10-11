@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Collection
 from datetime import UTC, datetime
 from typing import Any
 
@@ -6,139 +7,138 @@ import pytest
 
 from app.core.auth import CurrentUser
 from app.core.exceptions import AppError, ForbiddenError
-from app.core.secrets import SecretCipher
-from app.domains.agents.configurations import SECRET_PLACEHOLDER
-from app.domains.agents.models import Agent, AgentSecret
+from app.domains.agents.models import Agent
 from app.domains.agents.schemas import AgentCreate
 from app.domains.agents.service import AgentService
 
+ME = CurrentUser(user_sso="sso-me")
+MY_HTTP = uuid.uuid4()
+MY_MCP = uuid.uuid4()
+THEIR_HTTP = uuid.uuid4()
+
 
 class RecordingRepository:
-    """Stands in for the database: records what the service asks it to persist."""
-
     def __init__(self) -> None:
-        self.created: list[tuple[Agent, list[AgentSecret]]] = []
+        self.created: list[Agent] = []
 
     async def list_by_owner(
         self, owner_user_sso: str, *, page: int, page_size: int
     ) -> tuple[list[Agent], int]:
         return [], 0
 
-    async def create(self, agent: Agent, secrets: list[AgentSecret]) -> Agent:
+    async def create(self, agent: Agent) -> Agent:
         now = datetime.now(UTC)
         agent.id = uuid.uuid4()
         agent.created_at = now
         agent.updated_at = now
-        self.created.append((agent, secrets))
+        self.created.append(agent)
         return agent
 
 
-ME = CurrentUser(user_sso="sso-me")
+class FakeConnectors:
+    """Connector ownership as the database would report it."""
+
+    owned = {
+        ("sso-me", MY_HTTP): "http",
+        ("sso-me", MY_MCP): "mcp",
+        ("sso-them", THEIR_HTTP): "http",
+    }
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, set[uuid.UUID]]] = []
+
+    async def types_by_id(
+        self, owner_user_sso: str, ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, str]:
+        self.calls.append((owner_user_sso, set(ids)))
+        return {
+            i: t for (owner, i), t in self.owned.items() if owner == owner_user_sso and i in ids
+        }
 
 
-def body(configurations: dict[str, Any] | None = None) -> AgentCreate:
+def body(primitives: dict[str, Any] | None = None, **schedule: Any) -> AgentCreate:
     return AgentCreate.model_validate(
         {
             "agentTitle": "  Issue triager  ",
             "systemPrompt": "Triage new issues.",
-            "configurations": configurations if configurations is not None else {},
+            "configurations": {"primitives": primitives or {}, **schedule},
         }
     )
 
 
-async def test_creates_agent_owned_by_caller() -> None:
-    repo = RecordingRepository()
-    result = await AgentService(repo).create_agent("sso-me", body(), caller=ME, cipher=None)
+async def create(primitives: dict[str, Any] | None = None, **schedule: Any) -> tuple[Any, Any]:
+    repo, connectors = RecordingRepository(), FakeConnectors()
+    result = await AgentService(repo).create_agent(
+        "sso-me", body(primitives, **schedule), caller=ME, connectors=connectors
+    )
+    return result, (repo, connectors)
 
+
+async def test_creates_agent_with_own_connectors() -> None:
+    result, (repo, connectors) = await create(
+        {str(MY_HTTP): {}, str(MY_MCP): {"allowedTools": ["search_issues"]}}, dayOfWeek=[1]
+    )
     assert result.title == "Issue triager"
     assert result.owner_user_sso == "sso-me"
-    assert result.system_prompt == "Triage new issues."
-    agent, secrets = repo.created[0]
-    assert agent.owner_user_sso == "sso-me"
-    assert secrets == []
+    assert result.configurations["primitives"] == {
+        str(MY_HTTP): {},
+        str(MY_MCP): {"allowedTools": ["search_issues"]},
+    }
+    assert result.configurations["dayOfWeek"] == [1]
+    assert repo.created[0].owner_user_sso == "sso-me"
+    # Ownership is checked for the caller, not for anything in the request body.
+    assert connectors.calls == [("sso-me", {MY_HTTP, MY_MCP})]
 
 
-async def test_forbidden_when_caller_creates_for_another_user() -> None:
+async def test_agent_without_primitives_skips_connector_lookup() -> None:
+    _, (_, connectors) = await create()
+    assert connectors.calls == []
+
+
+async def test_forbidden_when_creating_for_another_user() -> None:
     repo = RecordingRepository()
     with pytest.raises(ForbiddenError):
-        await AgentService(repo).create_agent("sso-other", body(), caller=ME, cipher=None)
+        await AgentService(repo).create_agent(
+            "sso-them", body(), caller=ME, connectors=FakeConnectors()
+        )
     assert repo.created == []
 
 
-async def test_invalid_configuration_raises_app_error_with_field_paths() -> None:
+@pytest.mark.parametrize(
+    ("primitives", "message_part"),
+    [
+        ({str(uuid.uuid4()): {}}, "not found"),
+        ({str(THEIR_HTTP): {}}, "not found"),  # someone else's: same answer as missing
+        ({str(MY_MCP): {}}, "allowedTools"),
+        ({str(MY_HTTP): {"allowedTools": ["x"]}}, "only to MCP"),
+    ],
+)
+async def test_invalid_references_are_rejected(
+    primitives: dict[str, Any], message_part: str
+) -> None:
     repo = RecordingRepository()
-    bad = {"primitives": {"fetch": {"contractVersion": 1, "method": "GET", "URL": "http://10.0.0.1"}}}
-
     with pytest.raises(AppError) as exc:
-        await AgentService(repo).create_agent("sso-me", body(bad), caller=ME, cipher=None)
-
+        await AgentService(repo).create_agent(
+            "sso-me", body(primitives), caller=ME, connectors=FakeConnectors()
+        )
     assert exc.value.status_code == 422
     assert exc.value.code == "invalid_configuration"
-    fields = [e["field"] for e in exc.value.details["errors"]]
-    assert "configurations.primitives.fetch.URL" in fields
+    (connector_id,) = primitives
+    error = exc.value.details["errors"][0]
+    assert error["field"] == f"configurations.primitives.{connector_id}"
+    assert message_part in error["message"]
     assert repo.created == []
 
 
-async def test_error_details_never_echo_submitted_values() -> None:
-    repo = RecordingRepository()
-    bad = {
-        "primitives": {
-            "fetch": {
-                "contractVersion": 1,
-                "method": "GET",
-                "URL": "https://api.example.com",
-                "xApiKey": "s" * 5000,
-            }
-        }
-    }
+async def test_invalid_shape_is_rejected_before_lookup() -> None:
+    repo, connectors = RecordingRepository(), FakeConnectors()
     with pytest.raises(AppError) as exc:
-        await AgentService(repo).create_agent("sso-me", body(bad), caller=ME, cipher=None)
-    assert "sss" not in repr(exc.value.details)
-
-
-async def test_credentials_are_encrypted_and_masked() -> None:
-    repo = RecordingRepository()
-    cipher = SecretCipher(SecretCipher.generate_key())
-    cfg = {
-        "primitives": {
-            "create_issue": {
-                "contractVersion": 1,
-                "method": "POST",
-                "URL": "https://api.example.com/issues",
-                "xApiKey": "key-123",
-            }
-        }
-    }
-
-    result = await AgentService(repo).create_agent("sso-me", body(cfg), caller=ME, cipher=cipher)
-
-    assert result.configurations["primitives"]["create_issue"]["xApiKey"] == SECRET_PLACEHOLDER
-    agent, secrets = repo.created[0]
-    assert "key-123" not in repr(agent.configurations)
-    assert len(secrets) == 1
-    assert secrets[0].primitive_name == "create_issue"
-    assert secrets[0].field_name == "xApiKey"
-    assert secrets[0].ciphertext != "key-123"
-    assert cipher.decrypt(secrets[0].ciphertext) == "key-123"
-
-
-async def test_credentials_without_encryption_key_are_refused() -> None:
-    repo = RecordingRepository()
-    cfg = {
-        "primitives": {
-            "create_issue": {
-                "contractVersion": 1,
-                "method": "POST",
-                "URL": "https://api.example.com/issues",
-                "authorizationHeader": "Bearer abc",
-            }
-        }
-    }
-    with pytest.raises(AppError) as exc:
-        await AgentService(repo).create_agent("sso-me", body(cfg), caller=ME, cipher=None)
-    assert exc.value.status_code == 503
-    assert exc.value.code == "secret_storage_unavailable"
-    assert repo.created == []
+        await AgentService(repo).create_agent(
+            "sso-me", body(timeOfDay=[1440]), caller=ME, connectors=connectors
+        )
+    assert exc.value.status_code == 422
+    assert exc.value.details["errors"][0]["field"].startswith("configurations.timeOfDay")
+    assert connectors.calls == []
 
 
 def test_request_body_accepts_title_aliases() -> None:
