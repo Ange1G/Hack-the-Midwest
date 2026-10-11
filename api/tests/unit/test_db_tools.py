@@ -12,6 +12,7 @@ from db_tools import (  # noqa: E402
     is_read_only_mongo,
     is_read_only_redis,
     is_read_only_sql,
+    summarize_db_call,
 )
 
 SPEC = {
@@ -129,3 +130,10 @@ def test_read_write_connector_allows_write_sql() -> None:
         executor=lambda *_a, **_k: [{"ok": True}],
     )
     assert "ok" in text
+
+
+def test_summarize_db_call_keeps_response_body() -> None:
+    summary = summarize_db_call(SPEC, 'rows\n[{"id": 1}]')
+    assert summary["status"] == "rows"
+    assert summary["response_body"] == '[{"id": 1}]'
+    assert summary["name"] == "orders_db"

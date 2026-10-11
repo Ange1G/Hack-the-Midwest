@@ -78,6 +78,29 @@ def test_http_bundle_omits_secrets_from_tools() -> None:
     assert "key-live" not in dumped
 
 
+def test_http_bundle_includes_parameter_allowlists() -> None:
+    connector = Connector(
+        id=HTTP_ID,
+        owner_user_sso="sso-me",
+        type="http",
+        name="search_issues",
+        contract={
+            "type": "http",
+            "name": "search_issues",
+            "config": {
+                "method": "GET",
+                "URL": "https://api.example.com/search",
+                "queryParams": ["q", "limit"],
+            },
+        },
+    )
+    bundle = build_http_tool_bundle(
+        _agent(HTTP_ID), [ConnectorWithSecrets(connector, {})], cipher=None
+    )
+    assert bundle.tools[0]["query_params"] == ["q", "limit"]
+    assert "body_params" not in bundle.tools[0]
+
+
 def test_mcp_connectors_are_skipped() -> None:
     bundle = build_http_tool_bundle(_agent(MCP_ID), [_mcp()], cipher=None)
     assert bundle.tools == []

@@ -90,6 +90,49 @@ async def test_create_connector_returns_201_with_masked_credentials(
     assert "mcp-secret-789" not in repr(stored.contract)
 
 
+SLACK_URL = "https://hooks.slack.com/services/T000/B000/slack-secret-456"
+NOTIFICATION = {
+    "type": "notification",
+    "contractVersion": 1,
+    "name": "slack_alerts",
+    "credentials": {"webhookUrl": SLACK_URL},
+    "config": {"bodyParams": ["text"]},
+}
+
+
+async def test_notification_destination_is_stored_encrypted_and_never_returned(
+    client: AsyncClient, db_session: AsyncSession, encryption_key: str
+) -> None:
+    response = await post(client, NOTIFICATION)
+
+    assert response.status_code == 201, response.text
+    connector = response.json()["data"]
+    assert connector["type"] == "notification"
+    assert connector["contract"]["credentials"] == {"webhookUrl": SECRET_PLACEHOLDER}
+    assert connector["contract"]["config"] == {"bodyParams": ["text"]}
+    assert "slack-secret-456" not in response.text
+
+    rows = (
+        await db_session.execute(
+            select(ConnectorSecret).where(ConnectorSecret.connector_id == connector["id"])
+        )
+    ).scalars().all()
+    cipher = SecretCipher(encryption_key)
+    assert {r.field_name: cipher.decrypt(r.ciphertext) for r in rows} == {
+        "webhookUrl": SLACK_URL
+    }
+    listed = await client.get(URL, headers=AUTH)
+    assert "slack-secret-456" not in listed.text
+
+
+async def test_notification_with_internal_destination_is_422(client: AsyncClient) -> None:
+    bad = {**NOTIFICATION, "credentials": {"webhookUrl": "http://169.254.169.254/latest"}}
+    response = await post(client, bad)
+    assert response.status_code == 422, response.text
+    fields = [e["field"] for e in response.json()["error"]["details"]["errors"]]
+    assert "credentials.webhookUrl" in fields
+
+
 async def test_list_returns_only_my_connectors_paginated(
     client: AsyncClient, encryption_key: str
 ) -> None:
@@ -149,11 +192,117 @@ async def test_requires_authentication(client: AsyncClient) -> None:
     assert (await client.get(URL)).status_code == 401
 
 
+async def test_mcp_tools_preview_rejects_http_and_unknown(
+    client: AsyncClient,
+) -> None:
+    created = await post(client, HTTP)
+    assert created.status_code == 201
+    connector_id = created.json()["data"]["id"]
+    http_preview = await client.get(f"{URL}/{connector_id}/tools", headers=AUTH)
+    assert http_preview.status_code == 422
+    assert http_preview.json()["error"]["code"] == "connector_not_mcp"
+
+    missing = await client.get(
+        f"{URL}/00000000-0000-0000-0000-000000000001/tools", headers=AUTH
+    )
+    assert missing.status_code == 404
+    other = await client.get(f"{URL}/{connector_id}/tools", headers=OTHER)
+    assert other.status_code == 403
+
+
 async def test_connector_types_catalog(client: AsyncClient) -> None:
     response = await client.get("/api/v1/connector-types", headers=AUTH)
     assert response.status_code == 200
     types = {item["type"]: item for item in response.json()["data"]}
-    assert set(types) == {"http", "mcp", "database"}
+    assert set(types) == {"http", "mcp", "database", "knowledge", "notification"}
     assert types["mcp"]["credential_fields"] == ["xApiKey", "authorizationHeader"]
     assert "config" in types["mcp"]["config_schema"]["required"]
     assert (await client.get("/api/v1/connector-types")).status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# DELETE connector
+# ---------------------------------------------------------------------------
+
+AGENTS_URL = f"/api/v1/agents/{OWNER}"
+
+AGENT_BODY_BASE = {
+    "title": "My agent",
+    "systemPrompt": "You are helpful.",
+    "configurations": {
+        "primitives": {},
+        "dayOfWeek": [],
+        "timeOfDay": [],
+    },
+}
+
+
+async def create_agent(client: AsyncClient, primitives: dict) -> dict:
+    body = {
+        **AGENT_BODY_BASE,
+        "configurations": {**AGENT_BODY_BASE["configurations"], "primitives": primitives},
+    }
+    r = await client.post(AGENTS_URL, json=body, headers=AUTH)
+    assert r.status_code == 201, r.text
+    return r.json()["data"]
+
+
+async def test_delete_connector_returns_204(client: AsyncClient) -> None:
+    created = await post(client, HTTP)
+    connector_id = created.json()["data"]["id"]
+
+    response = await client.delete(f"{URL}/{connector_id}", headers=AUTH)
+    assert response.status_code == 204
+    assert response.content == b""
+
+    listed = await client.get(URL, headers=AUTH)
+    assert all(c["id"] != connector_id for c in listed.json()["data"])
+
+
+async def test_delete_connector_detaches_from_agents(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    created = await post(client, HTTP)
+    connector_id = created.json()["data"]["id"]
+
+    agent = await create_agent(client, {connector_id: {}})
+    assert connector_id in agent["configurations"]["primitives"]
+
+    response = await client.delete(f"{URL}/{connector_id}", headers=AUTH)
+    assert response.status_code == 204
+
+    agent_response = await client.get(f"{AGENTS_URL}/{agent['id']}", headers=AUTH)
+    updated = agent_response.json()["data"]
+    assert connector_id not in updated["configurations"]["primitives"]
+
+
+async def test_delete_connector_404_for_missing(client: AsyncClient) -> None:
+    missing = "00000000-0000-0000-0000-000000000002"
+    response = await client.delete(f"{URL}/{missing}", headers=AUTH)
+    assert response.status_code == 404
+
+
+async def test_delete_connector_404_for_another_tenants_connector(
+    client: AsyncClient,
+) -> None:
+    theirs = await client.post(OTHER_URL, json={**HTTP, "name": "theirs"}, headers=OTHER)
+    connector_id = theirs.json()["data"]["id"]
+
+    response = await client.delete(f"{URL}/{connector_id}", headers=AUTH)
+    assert response.status_code == 404
+
+
+async def test_delete_connector_403_wrong_path_user(client: AsyncClient) -> None:
+    created = await post(client, HTTP)
+    connector_id = created.json()["data"]["id"]
+
+    response = await client.delete(f"{URL}/{connector_id}", headers=OTHER)
+    assert response.status_code == 403
+
+
+async def test_delete_connector_401_unauthenticated(client: AsyncClient) -> None:
+    created = await post(client, HTTP)
+    connector_id = created.json()["data"]["id"]
+
+    response = await client.delete(f"{URL}/{connector_id}")
+    assert response.status_code == 401

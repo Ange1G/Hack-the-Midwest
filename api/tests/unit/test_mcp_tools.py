@@ -8,7 +8,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "runner"))
 
-from mcp_tools import ToolNotAllowedError, call_mcp_tool  # noqa: E402
+from mcp_tools import ToolNotAllowedError, call_mcp_tool, summarize_mcp_call  # noqa: E402
 
 SPEC = {
     "id": "mcp-1",
@@ -65,3 +65,10 @@ def test_call_uses_allowlisted_tool_and_auth_header() -> None:
 def test_disallowed_tool_is_rejected() -> None:
     with pytest.raises(ToolNotAllowedError):
         call_mcp_tool(SPEC, {}, "delete_issue", {})
+
+
+def test_summarize_mcp_call_keeps_response_body() -> None:
+    summary = summarize_mcp_call(SPEC, "list_issues", "ok\nissue-1")
+    assert summary["status"] == "ok"
+    assert summary["response_body"] == "issue-1"
+    assert summary["name"] == "linear__list_issues"

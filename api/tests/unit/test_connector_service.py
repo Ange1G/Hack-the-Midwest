@@ -52,6 +52,11 @@ class RecordingRepository:
     ) -> dict[uuid.UUID, str]:
         return {}
 
+    async def get_with_secrets(
+        self, owner_user_sso: str, ids: Collection[uuid.UUID]
+    ) -> list:
+        return []
+
 
 def cipher() -> SecretCipher:
     return SecretCipher(SecretCipher.generate_key())
@@ -154,3 +159,192 @@ async def test_list_is_owner_scoped_and_page_size_bounded() -> None:
         await ConnectorService(repo).list_connectors(
             "sso-them", page=1, page_size=20, caller=ME, settings=Settings(app_env="test")
         )
+
+
+class ToolsRepository(RecordingRepository):
+    def __init__(self, items: list | None = None) -> None:
+        super().__init__()
+        self.items = items or []
+
+    async def get_with_secrets(
+        self, owner_user_sso: str, ids: Collection[uuid.UUID]
+    ) -> list:
+        return [
+            item
+            for item in self.items
+            if item.connector.owner_user_sso == owner_user_sso
+            and item.connector.id in set(ids)
+        ]
+
+
+def _mcp_loaded(cipher: SecretCipher | None = None) -> tuple:
+    from app.domains.connectors.repository import ConnectorWithSecrets
+
+    connector = Connector(
+        id=uuid.uuid4(),
+        owner_user_sso="sso-me",
+        type="mcp",
+        name="linear",
+        contract={
+            "type": "mcp",
+            "name": "linear",
+            "config": {"URL": "https://mcp.example.com/mcp"},
+            "options": {"timeout": 4000},
+        },
+    )
+    ciphertexts: dict[str, str] = {}
+    if cipher is not None:
+        ciphertexts = {"authorizationHeader": cipher.encrypt("Bearer tok")}
+    return ConnectorWithSecrets(connector, ciphertexts)
+
+
+async def test_lists_mcp_tools_from_the_server() -> None:
+    from app.domains.connectors.repository import ConnectorWithSecrets
+
+    key = cipher()
+    loaded = _mcp_loaded(key)
+    seen: dict[str, object] = {}
+
+    async def list_tools(url: str, headers: dict[str, str], timeout_s: float) -> list[str]:
+        seen["url"] = url
+        seen["headers"] = headers
+        seen["timeout_s"] = timeout_s
+        return ["list_issues", "create_issue"]
+
+    result = await ConnectorService(ToolsRepository([loaded])).list_connector_tools(
+        "sso-me",
+        loaded.connector.id,
+        caller=ME,
+        cipher=key,
+        list_tools=list_tools,
+    )
+    assert result.type == "mcp"
+    assert result.tools == ["list_issues", "create_issue"]
+    assert seen["url"] == "https://mcp.example.com/mcp"
+    assert seen["headers"]["Authorization"] == "Bearer tok"
+    assert seen["timeout_s"] == 4.0
+    assert "tok" not in repr(result.model_dump())
+    _ = ConnectorWithSecrets
+
+
+async def test_tool_preview_rejects_non_mcp_connectors() -> None:
+    from app.domains.connectors.repository import ConnectorWithSecrets
+
+    connector = Connector(
+        id=uuid.uuid4(),
+        owner_user_sso="sso-me",
+        type="http",
+        name="status",
+        contract={"type": "http", "name": "status", "config": {"method": "GET", "URL": "https://status.example.com"}},
+    )
+    loaded = ConnectorWithSecrets(connector, {})
+
+    async def fail(*_a: object, **_k: object) -> list[str]:
+        raise AssertionError("list_tools should not be called")
+
+    with pytest.raises(AppError) as exc:
+        await ConnectorService(ToolsRepository([loaded])).list_connector_tools(
+            "sso-me", connector.id, caller=ME, cipher=None, list_tools=fail
+        )
+    assert exc.value.status_code == 422
+    assert exc.value.code == "connector_not_mcp"
+
+
+async def test_tool_preview_missing_connector_is_not_found() -> None:
+    async def fail(*_a: object, **_k: object) -> list[str]:
+        raise AssertionError("list_tools should not be called")
+
+    with pytest.raises(AppError) as exc:
+        await ConnectorService(ToolsRepository()).list_connector_tools(
+            "sso-me", uuid.uuid4(), caller=ME, cipher=None, list_tools=fail
+        )
+    assert exc.value.status_code == 404
+
+
+async def test_tool_preview_maps_mcp_errors() -> None:
+    from app.worker.bundle import BundleBuildError
+
+    loaded = _mcp_loaded()
+
+    async def boom(*_a: object, **_k: object) -> list[str]:
+        raise BundleBuildError("mcp_unavailable", "MCP server could not be reached")
+
+    with pytest.raises(AppError) as exc:
+        await ConnectorService(ToolsRepository([loaded])).list_connector_tools(
+            "sso-me", loaded.connector.id, caller=ME, cipher=None, list_tools=boom
+        )
+    assert exc.value.status_code == 502
+    assert exc.value.code == "mcp_unavailable"
+
+
+# ---------------------------------------------------------------------------
+# delete_connector
+# ---------------------------------------------------------------------------
+
+
+class DeletingRepository(RecordingRepository):
+    """Extends RecordingRepository to support delete_owned and tracks detach calls."""
+
+    def __init__(self, *, exists: bool = True) -> None:
+        super().__init__()
+        self.deleted: list[uuid.UUID] = []
+        self.exists = exists
+
+    async def delete_owned(self, owner_user_sso: str, connector_id: uuid.UUID) -> bool:
+        if not self.exists:
+            return False
+        self.deleted.append(connector_id)
+        return True
+
+
+class TrackingAgentRepository:
+    def __init__(self) -> None:
+        self.detached: list[tuple[str, uuid.UUID]] = []
+
+    async def detach_connector(self, owner_user_sso: str, connector_id: uuid.UUID) -> int:
+        self.detached.append((owner_user_sso, connector_id))
+        return 1
+
+    # Stub out the rest of the protocol
+    async def list_by_owner(self, *_a: object, **_k: object) -> tuple[list, int]:
+        return [], 0
+
+    async def create(self, agent: object) -> object:
+        return agent
+
+    async def get_owned(self, *_a: object, **_k: object) -> None:
+        return None
+
+    async def save(self, agent: object) -> object:
+        return agent
+
+
+async def test_delete_connector_calls_detach_then_delete() -> None:
+    repo = DeletingRepository()
+    agents = TrackingAgentRepository()
+    connector_id = uuid.uuid4()
+    await ConnectorService(repo, agents).delete_connector("sso-me", connector_id, caller=ME)
+
+    assert agents.detached == [("sso-me", connector_id)]
+    assert repo.deleted == [connector_id]
+
+
+async def test_delete_connector_forbidden_for_another_user() -> None:
+    repo = DeletingRepository()
+    agents = TrackingAgentRepository()
+    with pytest.raises(ForbiddenError):
+        await ConnectorService(repo, agents).delete_connector(
+            "sso-them", uuid.uuid4(), caller=ME
+        )
+    assert agents.detached == []
+    assert repo.deleted == []
+
+
+async def test_delete_connector_not_found_raises_not_found() -> None:
+    repo = DeletingRepository(exists=False)
+    agents = TrackingAgentRepository()
+    with pytest.raises(AppError) as exc:
+        await ConnectorService(repo, agents).delete_connector(
+            "sso-me", uuid.uuid4(), caller=ME
+        )
+    assert exc.value.status_code == 404

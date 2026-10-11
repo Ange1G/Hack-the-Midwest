@@ -99,8 +99,11 @@ def test_split_credentials_without_credentials() -> None:
 # ---------- registry and catalog ----------
 
 
-def test_registry_lists_http_mcp_and_database() -> None:
-    assert set(CONNECTORS) == {"http", "mcp", "database"}
+ALL_TYPES = {"http", "mcp", "database", "knowledge", "notification"}
+
+
+def test_registry_lists_every_connector_type() -> None:
+    assert set(CONNECTORS) == ALL_TYPES
 
 
 def test_every_registered_contract_uses_the_generic_base() -> None:
@@ -113,15 +116,20 @@ def test_every_registered_contract_uses_the_generic_base() -> None:
 
 def test_catalog_describes_each_connector() -> None:
     catalog = {entry["type"]: entry for entry in connector_catalog()}
-    assert set(catalog) == {"http", "mcp", "database"}
+    assert set(catalog) == ALL_TYPES
     expected_credentials = {
         "http": ["xApiKey", "authorizationHeader"],
         "mcp": ["xApiKey", "authorizationHeader"],
         "database": ["username", "password"],
+        "knowledge": [],
+        "notification": ["webhookUrl", "xApiKey", "authorizationHeader"],
     }
     for connector_type, entry in catalog.items():
         assert entry["name"] and entry["description"]
         assert entry["credential_fields"] == expected_credentials[connector_type]
         schema = entry["config_schema"]
-        assert {"type", "contractVersion", "name", "config"} <= set(schema["required"])
-        assert "credentials" in schema["properties"]
+        assert {"type", "contractVersion", "name"} <= set(schema["required"])
+        assert "config" in schema["properties"]
+        if expected_credentials[connector_type]:
+            assert "credentials" in schema["properties"]
+    assert "credentials" in catalog["notification"]["config_schema"]["required"]

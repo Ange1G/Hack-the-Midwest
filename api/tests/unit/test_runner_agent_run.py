@@ -7,6 +7,7 @@ sys.path.insert(0, str(ROOT / "runner"))
 
 from agent_run import (  # noqa: E402
     DEFAULT_USER_MESSAGE,
+    decode_run_input,
     failure_body,
     output_text,
     parse_manifest,
@@ -75,6 +76,20 @@ def test_run_turn_uses_supplied_user_message() -> None:
 def test_user_message_from_blank_falls_back() -> None:
     assert user_message_from(None) == DEFAULT_USER_MESSAGE
     assert user_message_from("   ") == DEFAULT_USER_MESSAGE
+
+
+def test_decode_run_input_prefers_base64_multiline() -> None:
+    import base64
+
+    raw = "Previous step output:\nline1\nline2"
+    encoded = base64.b64encode(raw.encode()).decode("ascii")
+    assert decode_run_input(run_input="ignored", run_input_b64=encoded) == raw
+
+
+def test_decode_run_input_falls_back_to_plain_and_invalid_b64() -> None:
+    assert decode_run_input(run_input="plain") == "plain"
+    assert decode_run_input(run_input="plain", run_input_b64="!!!") == "plain"
+    assert decode_run_input() is None
 
 
 def test_failure_body_truncates_code() -> None:

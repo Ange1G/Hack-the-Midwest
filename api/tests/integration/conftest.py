@@ -11,6 +11,8 @@ from app.domains.agents.models import Agent
 from app.domains.connectors.models import Connector
 from app.domains.executions.models import AgentExecution
 from app.domains.chains.models import AgentChain, ChainRun
+from app.domains.knowledge.models import KnowledgeDocument  # noqa: F401
+from app.domains.memory.models import AgentMemory  # noqa: F401
 from app.domains.webhooks.models import Webhook
 from app.scheduler.models import ScheduledChainFire, ScheduledExecutionFire
 from app.main import create_app

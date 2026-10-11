@@ -1,6 +1,6 @@
 import uuid
 
-from app.worker.docker_runner import docker_run_command
+from app.worker.docker_runner import docker_run_command, encode_run_input_b64
 from app.worker.runner import RunRequest
 
 
@@ -67,7 +67,8 @@ def test_docker_command_isolates_container_and_passes_callback_env() -> None:
     assert "CALLBACK_TOKEN=tok" in cmd
     assert "OPENAI_API_KEY=sk-secret-do-not-leak" in cmd
     assert "OPENAI_MODEL=gpt-4o-mini" in cmd
-    assert "RUN_INPUT=Summarize ticket 42" in cmd
+    assert f"RUN_INPUT_B64={encode_run_input_b64('Summarize ticket 42')}" in cmd
+    assert not any(item.startswith("RUN_INPUT=") for item in cmd)
     assert "agent-platform-runner:local" == cmd[-1]
     manifest_flag = next(item for item in cmd if item.startswith("AGENT_MANIFEST="))
     tools_flag = next(item for item in cmd if item.startswith("HTTP_TOOLS_JSON="))
@@ -151,3 +152,62 @@ def test_docker_command_no_ssl_ca_bundle_by_default() -> None:
     )
     assert "-v" not in cmd
     assert not any(item.startswith("SSL_CERT_FILE=") for item in cmd)
+
+
+def test_docker_command_sends_run_context_on_stdin_not_argv() -> None:
+    cmd = docker_run_command(
+        RunRequest(
+            execution_id=uuid.uuid4(),
+            agent_id=uuid.uuid4(),
+            owner_user_sso="sso-me",
+            callback_url="http://example.test/complete",
+            callback_token="tok",
+            agent_manifest={"title": "A"},
+            timeout_seconds=30,
+            image="agent-platform-runner:local",
+            run_context={"knowledge": [{"documents": [{"body": "private runbook"}]}]},
+        )
+    )
+    assert "-i" in cmd
+    assert "RUN_CONTEXT_STDIN=1" in cmd
+    assert "private runbook" not in " ".join(cmd)
+    assert cmd[-1] == "agent-platform-runner:local"
+
+
+def test_docker_command_without_context_keeps_stdin_closed() -> None:
+    cmd = docker_run_command(
+        RunRequest(
+            execution_id=uuid.uuid4(),
+            agent_id=uuid.uuid4(),
+            owner_user_sso="sso-me",
+            callback_url="http://example.test/complete",
+            callback_token="tok",
+            agent_manifest={"title": "A"},
+            timeout_seconds=30,
+            image="agent-platform-runner:local",
+        )
+    )
+    assert "-i" not in cmd
+    assert "RUN_CONTEXT_STDIN=1" not in cmd
+
+
+def test_docker_command_base64_encodes_multiline_run_input() -> None:
+    handoff = "Previous step output:\nline1\nline2"
+    cmd = docker_run_command(
+        RunRequest(
+            execution_id=uuid.uuid4(),
+            agent_id=uuid.uuid4(),
+            owner_user_sso="sso-me",
+            callback_url="http://example.test/complete",
+            callback_token="tok",
+            agent_manifest={"title": "A"},
+            timeout_seconds=30,
+            image="agent-platform-runner:local",
+            run_input=handoff,
+        )
+    )
+    flag = next(item for item in cmd if item.startswith("RUN_INPUT_B64="))
+    encoded = flag.removeprefix("RUN_INPUT_B64=")
+    assert encode_run_input_b64(handoff) == encoded
+    assert "\n" not in encoded
+    assert not any(item.startswith("RUN_INPUT=") for item in cmd)

@@ -97,7 +97,12 @@ async def test_two_step_chain_handoff_and_final_result_only(
         client,
         db_session,
         uuid.UUID(first_step["execution_id"]),
-        result={"output": "summary-from-a", "tool_calls": [{"name": "http_get"}]},
+        result={
+            "output": "summary-from-a",
+            "tool_calls": [
+                {"name": "http_get", "response_body": '{"name":"ditto"}'},
+            ],
+        },
     )
 
     mid = await client.get(f"{CHAINS}/runs/{run['id']}", headers=AUTH)
@@ -113,6 +118,7 @@ async def test_two_step_chain_handoff_and_final_result_only(
     assert ordered[1]["status"] == "queued"
     assert ordered[1]["input"] is not None
     assert "summary-from-a" in ordered[1]["input"]
+    assert '{"name":"ditto"}' in ordered[1]["input"]
 
     await _complete(
         client,

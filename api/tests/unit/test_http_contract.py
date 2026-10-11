@@ -98,6 +98,10 @@ def test_credential_fields_are_the_credentials_section() -> None:
         ("config.URL", "https://db.internal/", "SSRF: internal name"),
         ("config.URL", "https://intranet/", "SSRF: single-label name"),
         ("config.payload", {"q": 1}, "GET cannot carry a payload"),
+        ("config.bodyParams", ["title"], "GET cannot carry bodyParams"),
+        ("config.queryParams", [], "queryParams must be non-empty when set"),
+        ("config.queryParams", ["q"] * 21, "queryParams max 20"),
+        ("config.queryParams", ["not a key"], "queryParams must be identifier-like"),
         ("config.headers", {}, "unknown config field"),
         ("credentials", {"password": "x"}, "unknown credential field"),
         ("credentials", {"xApiKey": ""}, "empty credential"),
@@ -109,6 +113,23 @@ def test_credential_fields_are_the_credentials_section() -> None:
 def test_rejects_invalid_contracts(path: str, value: object, reason: str) -> None:
     with pytest.raises(ValidationError):
         HttpContract.model_validate(with_changes(path, value))
+
+
+def test_accepts_query_and_body_allowlists() -> None:
+    c = HttpContract.model_validate(
+        {
+            **VALID,
+            "config": {
+                "method": "POST",
+                "URL": PUBLIC_URL,
+                "payload": {"source": "agent"},
+                "queryParams": ["q", "limit", "q"],
+                "bodyParams": ["title", "body"],
+            },
+        }
+    )
+    assert c.config.query_params == ["q", "limit"]
+    assert c.config.body_params == ["title", "body"]
 
 
 def test_url_error_message_is_readable() -> None:
