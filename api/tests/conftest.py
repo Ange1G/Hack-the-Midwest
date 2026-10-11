@@ -4,7 +4,7 @@ import os
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault(
     "DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/agent_platform_test",
+    "postgresql+asyncpg://postgres:postgres@localhost:5433/agent_platform_test",
 )
 # Dummy key so worker tests can claim jobs without calling OpenAI.
 # Override an empty value from api/.env so process_once does not skip Docker in tests.

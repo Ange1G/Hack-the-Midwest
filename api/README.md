@@ -19,6 +19,8 @@ docker compose up -d
 uv sync --group dev
 ```
 
+Compose publishes Postgres on host port **5433** so it does not clash with a local Postgres on `5432`. If `alembic upgrade head` fails with password errors for user `postgres`, confirm Docker is running and `DATABASE_URL` uses port `5433`.
+
 Create the test database (once):
 
 ```bash

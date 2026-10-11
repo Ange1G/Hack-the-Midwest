@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     app_env: Literal["development", "production", "test"] = "development"
     database_url: str = (
-        "postgresql+asyncpg://postgres:postgres@localhost:5432/agent_platform"
+        "postgresql+asyncpg://postgres:postgres@localhost:5433/agent_platform"
     )
     default_page_size: int = 20
     max_page_size: int = 100
