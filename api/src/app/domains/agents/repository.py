@@ -23,6 +23,10 @@ class AgentRepository(Protocol):
 
     async def save(self, agent: Agent) -> Agent: ...
 
+    async def detach_connector(
+        self, owner_user_sso: str, connector_id: uuid.UUID
+    ) -> int: ...
+
 
 class SqlAlchemyAgentRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -76,3 +80,27 @@ class SqlAlchemyAgentRepository:
         await self._session.commit()
         await self._session.refresh(agent)
         return agent
+
+    async def detach_connector(
+        self, owner_user_sso: str, connector_id: uuid.UUID
+    ) -> int:
+        """Remove connector_id from configurations.primitives for all owner's agents that reference it.
+
+        Returns the number of agents updated. Flushes within the session but does not commit;
+        callers are expected to commit once both the detach and the connector delete succeed.
+        """
+        key = str(connector_id)
+        result = await self._session.execute(
+            select(Agent).where(
+                Agent.owner_user_sso == owner_user_sso,
+                Agent.configurations["primitives"].has_key(key),  # noqa: W601
+            )
+        )
+        agents = list(result.scalars().all())
+        for agent in agents:
+            primitives = dict(agent.configurations.get("primitives", {}))
+            primitives.pop(key, None)
+            agent.configurations = {**agent.configurations, "primitives": primitives}
+        if agents:
+            await self._session.flush()
+        return len(agents)

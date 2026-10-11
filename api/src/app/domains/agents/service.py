@@ -68,6 +68,7 @@ class AgentService:
             ) from None
 
         errors = await _connector_reference_errors(configurations, caller.user_sso, connectors)
+        errors += await self._delegate_errors(configurations, caller.user_sso, agent_id=None)
         if errors:
             raise _invalid_configuration(errors)
 
@@ -114,6 +115,9 @@ class AgentService:
             errors = await _connector_reference_errors(
                 configurations, caller.user_sso, connectors
             )
+            errors += await self._delegate_errors(
+                configurations, caller.user_sso, agent_id=agent.id
+            )
             if errors:
                 raise _invalid_configuration(errors)
             agent.configurations = configurations.model_dump(
@@ -135,6 +139,23 @@ class AgentService:
         if agent is None:
             raise NotFoundError("Agent not found")
         return AgentRead.model_validate(agent)
+
+    async def _delegate_errors(
+        self,
+        configurations: AgentConfigurations,
+        owner_user_sso: str,
+        *,
+        agent_id: uuid.UUID | None,
+    ) -> list[dict[str, str]]:
+        errors = []
+        for index, delegate_id in enumerate(configurations.delegates):
+            field = f"configurations.delegates.{index}"
+            if delegate_id == agent_id:
+                errors.append({"field": field, "message": "An agent cannot delegate to itself"})
+            elif await self._repository.get_owned(owner_user_sso, delegate_id) is None:
+                # Same answer for "missing" and "someone else's", so IDs can't be probed.
+                errors.append({"field": field, "message": "Agent not found"})
+        return errors
 
 
 class ConnectorLookup(Protocol):

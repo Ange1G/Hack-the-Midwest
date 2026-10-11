@@ -1,7 +1,7 @@
 """Typed schema for the `agents.configurations` JSONB column.
 
     { primitives: { "<connectorId>": { allowedTools?: [...] } },
-      month, dayOfWeek, timeOfDay }
+      month, dayOfWeek, timeOfDay, memory, delegates: ["<agentId>"], outputSchema }
 
 Agents reference the owner's connectors by ID; they never hold connector contracts or
 credentials themselves.
@@ -12,10 +12,12 @@ from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
+from app.domains.agents.output_schema import OutputSchema
 from app.domains.primitives.mcp_contract import McpToolName
 
 MAX_PRIMITIVES_PER_AGENT = 20
 MAX_ALLOWED_TOOLS = 100
+MAX_DELEGATES_PER_AGENT = 5
 MINUTES_PER_DAY = 24 * 60
 MAX_TIMES_PER_DAY = 48  # one run every 30 minutes
 
@@ -31,6 +33,10 @@ def _unique_sorted(values: list[int]) -> list[int]:
 
 def _dedupe_preserving_order(names: list[str] | None) -> list[str] | None:
     return None if names is None else list(dict.fromkeys(names))
+
+
+def _dedupe_uuids(values: list[uuid.UUID]) -> list[uuid.UUID]:
+    return list(dict.fromkeys(values))
 
 
 class ConnectorReference(BaseModel):
@@ -58,3 +64,14 @@ class AgentConfigurations(BaseModel):
     time_of_day: Annotated[list[MinuteOfDay], AfterValidator(_unique_sorted)] = Field(
         default_factory=list, alias="timeOfDay", max_length=MAX_TIMES_PER_DAY
     )
+    # Persist key/value memory across runs (see domains.memory).
+    memory: bool = Field(default=False, exclude_if=lambda value: not value)
+    # Other agents of the same owner this agent may call as tools. AgentService checks
+    # ownership and self-reference; the worker re-checks at run time.
+    delegates: Annotated[list[uuid.UUID], AfterValidator(_dedupe_uuids)] = Field(
+        default_factory=list,
+        max_length=MAX_DELEGATES_PER_AGENT,
+        exclude_if=lambda value: not value,
+    )
+    # JSON Schema the final reply must match; the runner validates it (see output_schema).
+    output_schema: OutputSchema | None = Field(default=None, alias="outputSchema")
