@@ -13,6 +13,21 @@ export const MAX_SYSTEM_PROMPT_LENGTH = 20_000;
 export const PRIMITIVE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 export const PRIMITIVE_NAME_MESSAGE =
 	"Use lowercase letters, numbers and underscores, starting with a letter";
+// MCP `description` limit, from the agreed generic contract
+// (spec/2026-10-10-connectors/task.md, MAX_DESCRIPTION_LENGTH).
+export const MAX_DESCRIPTION_LENGTH = 1_000;
+
+// Methods the team task lists for HTTP tools. Only GET and POST are accepted
+// by the agents API today (api/src/app/domains/primitives/http_contract.py),
+// so the rest are shown disabled.
+// TODO(spec): enable PUT/PATCH/DELETE once the backend HttpMethod accepts them.
+export const HTTP_METHOD_OPTIONS = [
+	{ value: "GET", supported: true },
+	{ value: "POST", supported: true },
+	{ value: "PUT", supported: false },
+	{ value: "PATCH", supported: false },
+	{ value: "DELETE", supported: false },
+] as const;
 
 const ADDRESS_MESSAGE =
 	"Private, loopback and link-local addresses are not allowed";

@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
 	CONTRACT_VERSION,
 	MAX_CREDENTIAL_LENGTH,
+	MAX_DESCRIPTION_LENGTH,
 	MAX_PRIMITIVES_PER_AGENT,
 	MAX_RETRIES,
 	MAX_SYSTEM_PROMPT_LENGTH,
@@ -157,43 +158,48 @@ const credentialSchema = z
 		"Provide the actual credential, not the placeholder",
 	);
 
+const publicUrlSchema = (requiredMessage: string) =>
+	z
+		.string()
+		.min(1, requiredMessage)
+		.superRefine((value, ctx) => {
+			if (!value) return;
+			const reason = unsafeUrlReason(value);
+			if (reason) ctx.addIssue({ code: "custom", message: reason });
+		});
+
+// The same bounds apply to every tool type; what they mean differs (see
+// tool-types.ts for the per-type helper text).
+const toolOptionsInputSchema = z.object({
+	retries: z
+		.number()
+		.int("Retries must be a whole number")
+		.min(0, `Retries must be between 0 and ${MAX_RETRIES}`)
+		.max(MAX_RETRIES, `Retries must be between 0 and ${MAX_RETRIES}`)
+		.optional(),
+	timeout: z
+		.number()
+		.int("Timeout must be a whole number of milliseconds")
+		.min(
+			MIN_TIMEOUT_MS,
+			`Timeout must be between ${MIN_TIMEOUT_MS} and ${MAX_TIMEOUT_MS} ms`,
+		)
+		.max(
+			MAX_TIMEOUT_MS,
+			`Timeout must be between ${MIN_TIMEOUT_MS} and ${MAX_TIMEOUT_MS} ms`,
+		)
+		.optional(),
+});
+
 export const httpContractInputSchema = z
 	.object({
 		contractVersion: z.literal(CONTRACT_VERSION),
 		method: httpMethodSchema,
-		URL: z
-			.string()
-			.min(1, "URL is required")
-			.superRefine((value, ctx) => {
-				if (!value) return;
-				const reason = unsafeUrlReason(value);
-				if (reason) ctx.addIssue({ code: "custom", message: reason });
-			}),
+		URL: publicUrlSchema("URL is required"),
 		payload: z.unknown().optional(),
 		xApiKey: credentialSchema.optional(),
 		authorizationHeader: credentialSchema.optional(),
-		options: z
-			.object({
-				retries: z
-					.number()
-					.int("Retries must be a whole number")
-					.min(0, `Retries must be between 0 and ${MAX_RETRIES}`)
-					.max(MAX_RETRIES, `Retries must be between 0 and ${MAX_RETRIES}`)
-					.optional(),
-				timeout: z
-					.number()
-					.int("Timeout must be a whole number of milliseconds")
-					.min(
-						MIN_TIMEOUT_MS,
-						`Timeout must be between ${MIN_TIMEOUT_MS} and ${MAX_TIMEOUT_MS} ms`,
-					)
-					.max(
-						MAX_TIMEOUT_MS,
-						`Timeout must be between ${MIN_TIMEOUT_MS} and ${MAX_TIMEOUT_MS} ms`,
-					)
-					.optional(),
-			})
-			.optional(),
+		options: toolOptionsInputSchema.optional(),
 	})
 	.superRefine((contract, ctx) => {
 		if (contract.method === "GET" && contract.payload !== undefined) {
@@ -206,6 +212,39 @@ export const httpContractInputSchema = z
 		}
 	});
 export type HttpContractInput = z.infer<typeof httpContractInputSchema>;
+
+// Tool types (team task, spec/2026-10-10-agent-tool-forms/task.md)
+
+export const toolTypeSchema = z.enum(["http", "mcp"]);
+export type ToolType = z.infer<typeof toolTypeSchema>;
+
+// Bring-your-own MCP server, in the agreed generic shape. The agents API does
+// not accept it yet, so the builder validates it but does not send it.
+// TODO(spec): send once the connectors API (spec/2026-10-10-connectors) is
+// live, together with the per-agent allowedTools list it requires.
+export const mcpToolInputSchema = z.object({
+	type: z.literal("mcp"),
+	contractVersion: z.literal(CONTRACT_VERSION),
+	name: z.string().regex(PRIMITIVE_NAME_PATTERN, PRIMITIVE_NAME_MESSAGE),
+	description: z
+		.string()
+		.max(
+			MAX_DESCRIPTION_LENGTH,
+			`Keep the description under ${MAX_DESCRIPTION_LENGTH} characters`,
+		)
+		.nullable()
+		.optional(),
+	options: toolOptionsInputSchema.nullable().optional(),
+	credentials: z
+		.object({
+			xApiKey: credentialSchema.nullable().optional(),
+			authorizationHeader: credentialSchema.nullable().optional(),
+		})
+		.nullable()
+		.optional(),
+	config: z.object({ URL: publicUrlSchema("Server URL is required") }),
+});
+export type McpToolInput = z.infer<typeof mcpToolInputSchema>;
 
 // Names are validated here rather than as record keys so the message and the
 // issue path (the offending name) are ours.

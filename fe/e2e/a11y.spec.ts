@@ -48,8 +48,10 @@ test("signed-in screens have no serious accessibility violations", async ({
 	await expectAccessible(page, "agents list");
 
 	await page.getByRole("link", { name: "New agent" }).click();
-	await page.getByRole("button", { name: "Add HTTP call" }).click();
-	await page.getByLabel("Method").selectOption("POST");
+	await page.getByRole("button", { name: "Add tool" }).click();
+	// Method is a shadcn Select: open it, then pick the option.
+	await page.getByLabel("Method").click();
+	await page.getByRole("option", { name: "POST" }).click();
 	await expect(page.getByLabel("Payload (JSON)")).toBeVisible();
 	await expectAccessible(page, "agent builder");
 
