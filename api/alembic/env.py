@@ -11,6 +11,7 @@ from app.core.database import Base
 from app.domains.agents.models import Agent  # noqa: F401
 from app.domains.connectors.models import Connector, ConnectorSecret  # noqa: F401
 from app.domains.executions.models import AgentExecution  # noqa: F401
+from app.scheduler.models import ScheduledExecutionFire  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

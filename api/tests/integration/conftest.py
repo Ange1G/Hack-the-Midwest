@@ -10,6 +10,7 @@ from app.core.database import Base, get_engine, get_session_factory, reset_datab
 from app.domains.agents.models import Agent
 from app.domains.connectors.models import Connector
 from app.domains.executions.models import AgentExecution
+from app.scheduler.models import ScheduledExecutionFire
 from app.main import create_app
 
 
@@ -31,6 +32,7 @@ async def database_harness() -> AsyncGenerator[None]:
             )
         session_factory = get_session_factory()
         async with session_factory() as session:
+            await session.execute(delete(ScheduledExecutionFire))
             await session.execute(delete(AgentExecution))
             await session.execute(delete(Agent))
             await session.commit()

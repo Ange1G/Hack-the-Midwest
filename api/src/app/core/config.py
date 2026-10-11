@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     database_provisioner_network: str | None = None
     # Seconds to wait for a provisioned database to accept connections.
     database_provisioner_ready_timeout: int = 90
+    scheduler_poll_interval_seconds: float = 15.0
+    # IANA timezone used to interpret agent dayOfWeek / timeOfDay. MVP: one zone
+    # for the whole platform (default UTC).
+    scheduler_timezone: str = "UTC"
 
     @field_validator("cors_origins", mode="before")
     @classmethod

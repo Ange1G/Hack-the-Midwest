@@ -186,6 +186,12 @@ container is started. The key must not appear in agent configuration or callback
 2. Build the runner image from the repo root: `docker build -t agent-platform-runner:local runner`
 3. API (from `api/`): `uv run uvicorn app.main:app --app-dir src --reload --host 0.0.0.0 --port 8000`
 4. Worker (from `api/`): `uv run agent-worker`
+5. Scheduler (optional, from `api/`): `uv run agent-scheduler`
+
+The scheduler is a separate process. It reads each agent's `configurations.dayOfWeek`
+and `timeOfDay` in `SCHEDULER_TIMEZONE` (default UTC; `0` = Sunday) and enqueues a run
+at most once per agent per slot (`YYYY-MM-DD:mmmm`). Empty `timeOfDay` means the agent
+is not scheduled. Poll interval is `SCHEDULER_POLL_INTERVAL_SECONDS` (default 15).
 
 The container must reach the API at `EXECUTION_CALLBACK_BASE_URL`
 (default `http://host.docker.internal:8000`). The worker always passes
