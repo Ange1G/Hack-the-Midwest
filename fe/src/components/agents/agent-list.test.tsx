@@ -157,7 +157,7 @@ describe("AgentList", () => {
 		);
 	});
 
-	it("confirms a started run and says stop and delete are not available yet", async () => {
+	it("deletes an idle agent and shows a success toast", async () => {
 		const owner = signInAs();
 		createAgent(owner.user_sso, safeAgentInput);
 		const user = userEvent.setup();
@@ -169,11 +169,29 @@ describe("AgentList", () => {
 		);
 
 		const row = await tableRow("Uptime checker");
-
 		await user.click(within(row).getByRole("button", { name: "Delete" }));
-		expect(
-			await screen.findByText("Deleting agents is not available yet"),
-		).toBeInTheDocument();
+
+		expect(await screen.findByText("Agent deleted")).toBeInTheDocument();
+		// Row should no longer be in the table after list refresh
+		await waitFor(() =>
+			expect(
+				screen.queryByRole("link", { name: "Uptime checker" }),
+			).not.toBeInTheDocument(),
+		);
+	});
+
+	it("confirms a started run and says stop is not available yet", async () => {
+		const owner = signInAs();
+		createAgent(owner.user_sso, safeAgentInput);
+		const user = userEvent.setup();
+		renderWithProviders(
+			<>
+				<AgentList />
+				<Toaster />
+			</>,
+		);
+
+		const row = await tableRow("Uptime checker");
 
 		await user.click(within(row).getByRole("button", { name: "Start" }));
 		expect(await screen.findByText("Run started")).toBeInTheDocument();
