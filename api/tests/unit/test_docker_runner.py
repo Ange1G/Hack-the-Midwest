@@ -19,6 +19,7 @@ def test_docker_command_isolates_container_and_passes_callback_env() -> None:
             image="agent-platform-runner:local",
             openai_api_key="sk-secret-do-not-leak",
             openai_model="gpt-4o-mini",
+            run_input="Summarize ticket 42",
             http_tools=[
                 {
                     "id": "11111111-1111-1111-1111-111111111111",
@@ -66,6 +67,7 @@ def test_docker_command_isolates_container_and_passes_callback_env() -> None:
     assert "CALLBACK_TOKEN=tok" in cmd
     assert "OPENAI_API_KEY=sk-secret-do-not-leak" in cmd
     assert "OPENAI_MODEL=gpt-4o-mini" in cmd
+    assert "RUN_INPUT=Summarize ticket 42" in cmd
     assert "agent-platform-runner:local" == cmd[-1]
     manifest_flag = next(item for item in cmd if item.startswith("AGENT_MANIFEST="))
     tools_flag = next(item for item in cmd if item.startswith("HTTP_TOOLS_JSON="))

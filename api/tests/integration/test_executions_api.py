@@ -38,6 +38,37 @@ async def test_enqueue_returns_202_queued(
     assert body["data"]["status"] == "queued"
     assert body["data"]["agent_id"] == str(agent.id)
     assert body["data"]["result"] is None
+    assert body["data"]["input"] is None
+
+
+async def test_enqueue_with_input_persists_and_get_returns_it(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    agent = await _create_agent(db_session)
+    response = await client.post(
+        f"/api/v1/agents/{OWNER}/{agent.id}/executions",
+        headers=AUTH,
+        json={"input": "Summarize yesterday's tickets"},
+    )
+    assert response.status_code == 202, response.text
+    execution_id = response.json()["data"]["id"]
+    assert response.json()["data"]["input"] == "Summarize yesterday's tickets"
+    fetched = await client.get(
+        f"/api/v1/agents/{OWNER}/executions/{execution_id}", headers=AUTH
+    )
+    assert fetched.json()["data"]["input"] == "Summarize yesterday's tickets"
+
+
+async def test_enqueue_oversized_input_returns_422(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    agent = await _create_agent(db_session)
+    response = await client.post(
+        f"/api/v1/agents/{OWNER}/{agent.id}/executions",
+        headers=AUTH,
+        json={"input": "x" * 20_001},
+    )
+    assert response.status_code == 422
 
 
 async def test_enqueue_and_get_round_trip(

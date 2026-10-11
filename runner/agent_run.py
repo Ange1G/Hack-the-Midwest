@@ -72,13 +72,20 @@ def failure_body(code: str, message: str) -> dict[str, Any]:
     }
 
 
+def user_message_from(raw: str | None) -> str:
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return DEFAULT_USER_MESSAGE
+
+
 def run_turn(
     *,
     manifest: dict[str, Any],
     model_id: str,
     invoke: Callable[[str, str], object],
     tool_calls: list[dict[str, Any]] | None = None,
+    user_message: str | None = None,
 ) -> dict[str, Any]:
     prompt = system_prompt_from(manifest)
-    result = invoke(prompt, DEFAULT_USER_MESSAGE)
+    result = invoke(prompt, user_message_from(user_message))
     return success_body(output_text(result), model_id, tool_calls)

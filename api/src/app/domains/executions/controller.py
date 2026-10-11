@@ -5,7 +5,7 @@ from app.common.pagination import total_pages as compute_total_pages
 from app.core.auth import CurrentUser
 from app.core.config import Settings
 from app.core.request_context import request_id_ctx
-from app.domains.executions.schemas import ExecutionComplete, ExecutionRead
+from app.domains.executions.schemas import ExecutionComplete, ExecutionCreate, ExecutionRead
 from app.domains.executions.service import ExecutionService
 
 
@@ -27,10 +27,11 @@ class ExecutionsController:
         user_sso: str,
         agent_id: uuid.UUID,
         *,
+        body: ExecutionCreate | None = None,
         caller: CurrentUser,
     ) -> ApiEnvelope[ExecutionRead]:
         execution = await self._service.enqueue(
-            user_sso, agent_id, caller=caller, settings=self._settings
+            user_sso, agent_id, body=body, caller=caller, settings=self._settings
         )
         return self._item(execution)
 

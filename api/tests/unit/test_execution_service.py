@@ -8,7 +8,7 @@ from app.core.config import Settings
 from app.core.exceptions import AppError, ForbiddenError, NotFoundError, UnauthorizedError
 from app.domains.agents.models import Agent
 from app.domains.executions.models import AgentExecution, ExecutionStatus
-from app.domains.executions.schemas import ExecutionComplete
+from app.domains.executions.schemas import ExecutionComplete, ExecutionCreate
 from app.domains.executions.service import ExecutionService
 from app.domains.executions.tokens import hash_callback_token
 
@@ -114,6 +114,20 @@ async def test_enqueue_creates_queued_execution() -> None:
     assert result.agent_id == AGENT_ID
     assert result.owner_user_sso == "sso-me"
     assert executions.created[0].callback_token_hash is None
+    assert executions.created[0].input is None
+
+
+async def test_enqueue_persists_run_input() -> None:
+    executions = FakeExecutions()
+    result = await ExecutionService(executions, FakeAgents([_agent()])).enqueue(
+        "sso-me",
+        AGENT_ID,
+        body=ExecutionCreate(input="Summarize yesterday"),
+        caller=ME,
+        settings=SETTINGS,
+    )
+    assert result.input == "Summarize yesterday"
+    assert executions.created[0].input == "Summarize yesterday"
 
 
 async def test_enqueue_forbidden_for_other_user() -> None:

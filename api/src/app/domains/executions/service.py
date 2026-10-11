@@ -9,7 +9,7 @@ from app.domains.agents.models import Agent
 from app.domains.agents.repository import AgentRepository
 from app.domains.executions.models import AgentExecution, ExecutionStatus
 from app.domains.executions.repository import ExecutionRepository, is_terminal
-from app.domains.executions.schemas import ExecutionComplete, ExecutionRead
+from app.domains.executions.schemas import ExecutionComplete, ExecutionCreate, ExecutionRead
 from app.domains.executions.tokens import callback_token_matches
 
 
@@ -29,6 +29,7 @@ class ExecutionService:
         *,
         caller: CurrentUser,
         settings: Settings,
+        body: ExecutionCreate | None = None,
     ) -> ExecutionRead:
         ensure_caller_owns(owner_user_sso, caller)
         agent = await self._agents.get_owned(owner_user_sso, agent_id)
@@ -49,6 +50,7 @@ class ExecutionService:
                 agent_id=agent.id,
                 owner_user_sso=caller.user_sso,
                 status=ExecutionStatus.QUEUED.value,
+                input=body.input if body is not None else None,
             )
         )
         return ExecutionRead.model_validate(created)

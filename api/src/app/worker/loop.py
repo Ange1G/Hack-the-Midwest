@@ -55,6 +55,7 @@ class ClaimedJob:
     http_credentials: dict[str, dict[str, str]] = field(default_factory=dict)
     mcp_servers: list[dict[str, Any]] = field(default_factory=list)
     mcp_credentials: dict[str, dict[str, str]] = field(default_factory=dict)
+    run_input: str | None = None
 
 
 async def process_once(
@@ -147,6 +148,7 @@ async def _run_with_databases(
                 http_credentials=claimed.http_credentials or None,
                 mcp_servers=claimed.mcp_servers,
                 mcp_credentials=claimed.mcp_credentials or None,
+                run_input=claimed.run_input,
                 database_tools=db_bundle.tools,
                 database_credentials=db_bundle.credentials or None,
                 ssl_ca_bundle=settings.execution_ssl_ca_bundle or None,
@@ -223,6 +225,7 @@ async def _claim(
             http_credentials=http_bundle.credentials,
             mcp_servers=mcp_bundle.servers,
             mcp_credentials=mcp_bundle.credentials,
+            run_input=execution.input,
         )
 
 

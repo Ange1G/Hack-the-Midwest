@@ -3,9 +3,10 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 DEFAULT_MAX_EXECUTION_RESULT_BYTES = 1_048_576
+MAX_RUN_INPUT_LENGTH = 20_000
 
 
 class ExecutionRead(BaseModel):
@@ -13,6 +14,7 @@ class ExecutionRead(BaseModel):
     agent_id: uuid.UUID
     owner_user_sso: str
     status: str
+    input: str | None = None
     result: dict[str, Any] | None
     error_code: str | None
     error_message: str | None
@@ -23,6 +25,21 @@ class ExecutionRead(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ExecutionCreate(BaseModel):
+    """Optional enqueue body. Empty or omitted `input` keeps the runner default message."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    input: str | None = Field(default=None, max_length=MAX_RUN_INPUT_LENGTH)
+
+    @field_validator("input", mode="before")
+    @classmethod
+    def _blank_input_is_none(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 class ExecutionErrorBody(BaseModel):

@@ -2,7 +2,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import delete
+from sqlalchemy import delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -25,6 +25,10 @@ async def database_harness() -> AsyncGenerator[None]:
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            # create_all does not add columns to existing tables.
+            await conn.execute(
+                text("ALTER TABLE agent_executions ADD COLUMN IF NOT EXISTS input TEXT")
+            )
         session_factory = get_session_factory()
         async with session_factory() as session:
             await session.execute(delete(AgentExecution))

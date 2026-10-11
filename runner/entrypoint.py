@@ -147,6 +147,7 @@ def main() -> None:
             model_id=model_id,
             invoke=invoke_strands,
             tool_calls=TOOL_CALLS,
+            user_message=os.environ.get("RUN_INPUT"),
         )
     except Exception as exc:
         payload = failure_body("llm_error", str(exc))

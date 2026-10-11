@@ -7,7 +7,7 @@ from app.common.envelope import ApiEnvelope
 from app.core.auth import CurrentUser
 from app.core.config import Settings, get_settings
 from app.domains.executions.controller import ExecutionsController
-from app.domains.executions.schemas import ExecutionComplete, ExecutionRead
+from app.domains.executions.schemas import ExecutionComplete, ExecutionCreate, ExecutionRead
 
 router = APIRouter()
 internal_router = APIRouter()
@@ -20,10 +20,11 @@ internal_router = APIRouter()
 async def enqueue_execution(
     user_sso: str,
     agent_id: uuid.UUID,
+    body: ExecutionCreate | None = None,
     controller: ExecutionsController = Depends(get_executions_controller),
     caller: CurrentUser = Depends(get_current_user),
 ) -> ApiEnvelope[ExecutionRead]:
-    return await controller.enqueue(user_sso, agent_id, caller=caller)
+    return await controller.enqueue(user_sso, agent_id, body=body, caller=caller)
 
 
 @router.get("/{user_sso}/executions")

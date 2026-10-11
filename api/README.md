@@ -151,11 +151,16 @@ Adding a connector type: subclass `BaseContract` in `app/domains/primitives/` an
 
 ## Run an agent (local Docker)
 
-Enqueue a run (returns `202` immediately):
+Enqueue a run (returns `202` immediately). Optional JSON body `{ "input": "..." }`
+(max 20,000 characters) becomes the runner user message; omit it to keep the default.
 
 ```bash
 curl -s -X POST -H "X-Dev-User-SSO: sso-user-a" \
   "http://localhost:8000/api/v1/agents/sso-user-a/<agent-id>/executions"
+
+curl -s -X POST -H "X-Dev-User-SSO: sso-user-a" -H "Content-Type: application/json" \
+  "http://localhost:8000/api/v1/agents/sso-user-a/<agent-id>/executions" \
+  -d '{"input": "Summarize yesterday"}'
 ```
 
 Inspect it:
