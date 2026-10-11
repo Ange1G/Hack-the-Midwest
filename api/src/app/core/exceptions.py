@@ -94,6 +94,14 @@ def register_exception_handlers(app: FastAPI) -> None:
             content=_envelope_error(
                 "validation_error",
                 "Request validation failed",
-                details={"errors": exc.errors()},
+                details={"errors": [_json_safe_error(error) for error in exc.errors()]},
             ),
         )
+
+
+def _json_safe_error(error: dict) -> dict:
+    """Validator `ctx` can hold the raised exception object, which JSON cannot encode."""
+    ctx = error.get("ctx")
+    if not isinstance(ctx, dict):
+        return error
+    return {**error, "ctx": {key: str(value) for key, value in ctx.items()}}

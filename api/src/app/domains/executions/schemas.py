@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.domains.memory.schemas import MemoryWrites
+
 DEFAULT_MAX_EXECUTION_RESULT_BYTES = 1_048_576
 MAX_RUN_INPUT_LENGTH = 20_000
 
@@ -55,6 +57,7 @@ class ExecutionComplete(BaseModel):
     status: Literal["succeeded", "failed"]
     result: dict[str, Any] | None = None
     error: ExecutionErrorBody | None = None
+    memory: MemoryWrites | None = None
 
     @model_validator(mode="after")
     def _status_matches_payload(self) -> "ExecutionComplete":
@@ -62,6 +65,8 @@ class ExecutionComplete(BaseModel):
             raise ValueError("failed executions require error")
         if self.status == "succeeded" and self.error is not None:
             raise ValueError("succeeded executions cannot include error")
+        if self.status == "failed" and self.memory is not None:
+            raise ValueError("failed executions cannot write memory")
         encoded = json.dumps(self.result) if self.result is not None else ""
         if len(encoded.encode()) > DEFAULT_MAX_EXECUTION_RESULT_BYTES:
             raise ValueError("result exceeds maximum size")

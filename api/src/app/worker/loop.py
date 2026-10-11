@@ -15,6 +15,9 @@ from app.domains.executions.repository import SqlAlchemyExecutionRepository, is_
 from app.domains.chains.orchestrator import notify_execution_terminal
 from app.domains.executions.service import agent_manifest
 from app.domains.executions.tokens import generate_callback_token, hash_callback_token
+from app.domains.knowledge.repository import SqlAlchemyKnowledgeRepository
+from app.domains.memory.repository import SqlAlchemyMemoryRepository
+from app.domains.memory.service import memory_enabled
 from app.runtime.agent_databases import AgentDatabaseError, Resolver, agent_databases
 from app.runtime.database_provisioner import DatabaseProvisioner, DockerDatabaseProvisioner
 from app.worker.bundle import (
@@ -29,6 +32,13 @@ from app.worker.bundle import (
     referenced_connector_ids,
 )
 from app.worker.mcp_client import list_mcp_tools
+from app.worker.run_context import (
+    build_delegate_bundle,
+    delegate_ids,
+    knowledge_ids,
+    knowledge_snapshot,
+    run_context,
+)
 from app.worker.runner import ContainerRunner, RunOutcome, RunRequest
 
 
@@ -57,6 +67,7 @@ class ClaimedJob:
     mcp_servers: list[dict[str, Any]] = field(default_factory=list)
     mcp_credentials: dict[str, dict[str, str]] = field(default_factory=dict)
     run_input: str | None = None
+    run_context: dict[str, Any] | None = None
 
 
 async def process_once(
@@ -152,6 +163,7 @@ async def _run_with_databases(
                 mcp_servers=claimed.mcp_servers,
                 mcp_credentials=claimed.mcp_credentials or None,
                 run_input=claimed.run_input,
+                run_context=claimed.run_context,
                 database_tools=db_bundle.tools,
                 database_credentials=db_bundle.credentials or None,
                 ssl_ca_bundle=settings.execution_ssl_ca_bundle or None,
@@ -206,8 +218,10 @@ async def _claim(
                 await notify_execution_terminal(session, updated, settings)
             return None
         try:
-            http_bundle, mcp_bundle = await _connector_bundles(
+            prepared = await _prepare_run(
+                session,
                 agent,
+                agents,
                 connectors,
                 settings,
                 list_mcp_tools=list_mcp_tools,
@@ -228,32 +242,86 @@ async def _claim(
             owner_user_sso=execution.owner_user_sso,
             callback_token=token,
             manifest=agent_manifest(agent),
-            http_tools=http_bundle.tools,
-            http_credentials=http_bundle.credentials,
-            mcp_servers=mcp_bundle.servers,
-            mcp_credentials=mcp_bundle.credentials,
+            http_tools=prepared.http.tools,
+            http_credentials=prepared.http_credentials,
+            mcp_servers=prepared.mcp.servers,
+            mcp_credentials=prepared.mcp_credentials,
             run_input=execution.input,
+            run_context=prepared.run_context,
         )
 
 
-async def _connector_bundles(
+@dataclass(frozen=True)
+class _PreparedRun:
+    http: HttpToolBundle
+    mcp: McpToolBundle
+    http_credentials: dict[str, dict[str, str]]
+    mcp_credentials: dict[str, dict[str, str]]
+    run_context: dict[str, Any] | None
+
+
+async def _prepare_run(
+    session: AsyncSession,
     agent: Agent,
+    agents: SqlAlchemyAgentRepository,
     connectors: SqlAlchemyConnectorRepository,
     settings: Settings,
     *,
     list_mcp_tools: McpListTools | None = None,
-) -> tuple[HttpToolBundle, McpToolBundle]:
-    ids = referenced_connector_ids(agent)
+) -> _PreparedRun:
+    delegates: list[Agent] = []
+    for delegate_id in delegate_ids(agent):
+        delegate = await agents.get_owned(agent.owner_user_sso, delegate_id)
+        if delegate is None or delegate.id == agent.id:
+            raise BundleBuildError("delegate_missing", "Delegate agent not found")
+        delegates.append(delegate)
+
+    ids = list(
+        dict.fromkeys(
+            [*referenced_connector_ids(agent)]
+            + [cid for delegate in delegates for cid in referenced_connector_ids(delegate)]
+        )
+    )
     owned = await connectors.get_with_secrets(agent.owner_user_sso, ids)
     cipher = cipher_from_settings(settings)
+    lister = list_mcp_tools or list_mcp_tools_default
     http_bundle = build_http_tool_bundle(agent, owned, cipher)
-    mcp_bundle = await build_mcp_tool_bundle(
-        agent,
+    mcp_bundle = await build_mcp_tool_bundle(agent, owned, cipher, list_tools=lister)
+    delegate_bundle = await build_delegate_bundle(
+        delegates,
         owned,
         cipher,
-        list_tools=list_mcp_tools or list_mcp_tools_default,
+        list_tools=lister,
+        reserved_names={tool["name"] for tool in http_bundle.tools},
     )
-    return http_bundle, mcp_bundle
+
+    parent_knowledge = knowledge_ids(agent, owned)
+    all_knowledge = list(
+        dict.fromkeys(
+            parent_knowledge
+            + [kid for spec in delegate_bundle.specs for kid in spec["knowledge_ids"]]
+        )
+    )
+    documents = await SqlAlchemyKnowledgeRepository(session).documents_for_connectors(
+        agent.owner_user_sso, [uuid.UUID(kid) for kid in all_knowledge]
+    )
+    memory: dict[str, Any] | None = None
+    if memory_enabled(agent.configurations):
+        rows = await SqlAlchemyMemoryRepository(session).list_for_agent(agent.id)
+        memory = {"entries": {row.key: row.value for row in rows}}
+
+    return _PreparedRun(
+        http=http_bundle,
+        mcp=mcp_bundle,
+        http_credentials={**delegate_bundle.http_credentials, **http_bundle.credentials},
+        mcp_credentials={**delegate_bundle.mcp_credentials, **mcp_bundle.credentials},
+        run_context=run_context(
+            knowledge_ids_for_agent=parent_knowledge,
+            knowledge=knowledge_snapshot(owned, all_knowledge, documents),
+            memory=memory,
+            delegates=delegate_bundle.specs,
+        ),
+    )
 
 
 # Alias so tests can inject a fake while production uses the HTTP client.

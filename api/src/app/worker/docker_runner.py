@@ -1,7 +1,9 @@
 import asyncio
+import base64
 import json
 import subprocess
 
+from app.worker.run_context import encode_run_context
 from app.worker.runner import RunOutcome, RunRequest
 
 CONTAINER_MEMORY = "256m"
@@ -22,7 +24,8 @@ def docker_run_command(request: RunRequest) -> list[str]:
     if request.openai_api_key:
         env.append(f"OPENAI_API_KEY={request.openai_api_key}")
     if request.run_input:
-        env.append(f"RUN_INPUT={request.run_input}")
+        # Base64 so multiline handoff text survives `docker run -e`.
+        env.append(f"RUN_INPUT_B64={encode_run_input_b64(request.run_input)}")
     if request.http_tools is not None:
         env.append(f"HTTP_TOOLS_JSON={json.dumps(request.http_tools)}")
     if request.http_credentials:
@@ -35,6 +38,8 @@ def docker_run_command(request: RunRequest) -> list[str]:
         env.append(f"DATABASE_TOOLS_JSON={json.dumps(request.database_tools)}")
     if request.database_credentials:
         env.append(f"DATABASE_CREDENTIALS_JSON={json.dumps(request.database_credentials)}")
+    if request.run_context is not None:
+        env.append("RUN_CONTEXT_STDIN=1")
     # When a CA bundle is configured on the host, mount it read-only into the
     # container at a fixed path and tell Python/httpx to use it via SSL_CERT_FILE.
     # This is needed on hosts that perform TLS interception or that have private
@@ -65,11 +70,17 @@ def docker_run_command(request: RunRequest) -> list[str]:
         "--add-host",
         "host.docker.internal:host-gateway",
     ]
+    if request.run_context is not None:
+        command.append("-i")
     command.extend(volume_args)
     for item in env:
         command.extend(["-e", item])
     command.append(request.image)
     return command
+
+
+def encode_run_input_b64(value: str) -> str:
+    return base64.b64encode(value.encode("utf-8")).decode("ascii")
 
 
 def container_name(execution_id: object) -> str:
@@ -79,10 +90,16 @@ def container_name(execution_id: object) -> str:
 class LocalDockerRunner:
     async def run(self, request: RunRequest) -> RunOutcome:
         cmd = docker_run_command(request)
+        stdin = (
+            encode_run_context(request.run_context)
+            if request.run_context is not None
+            else None
+        )
         try:
             completed = await asyncio.to_thread(
                 subprocess.run,
                 cmd,
+                input=stdin,
                 capture_output=True,
                 text=True,
                 timeout=request.timeout_seconds,

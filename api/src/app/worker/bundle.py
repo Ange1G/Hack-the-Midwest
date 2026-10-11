@@ -94,12 +94,20 @@ def build_http_tool_bundle(
     for connector_id in requested:
         loaded = by_id[connector_id]
         connector = loaded.connector
-        if connector.type != "http":
+        if connector.type not in ("http", "notification"):
             continue
         decrypted = (
             _decrypt_ciphertexts(loaded.ciphertexts, cipher) if loaded.ciphertexts else {}
         )
-        tools.append(_http_tool_spec(connector))
+        if connector.type == "notification":
+            if not decrypted.get("webhookUrl"):
+                raise BundleBuildError(
+                    "notification_destination_missing",
+                    f"Notification connector '{connector.name}' has no stored destination",
+                )
+            tools.append(_notification_tool_spec(connector))
+        else:
+            tools.append(_http_tool_spec(connector))
         if decrypted:
             credentials[str(connector.id)] = decrypted
     return HttpToolBundle(tools=tools, credentials=credentials)
@@ -201,6 +209,31 @@ def _http_tool_spec(connector: Connector) -> dict[str, Any]:
         "URL": config.get("URL"),
         "timeout_ms": timeout_ms,
         "retries": retries,
+    }
+    if config.get("payload") is not None:
+        spec["payload"] = config["payload"]
+    query_params = config.get("queryParams") or config.get("query_params")
+    if query_params:
+        spec["query_params"] = list(query_params)
+    body_params = config.get("bodyParams") or config.get("body_params")
+    if body_params:
+        spec["body_params"] = list(body_params)
+    return spec
+
+
+def _notification_tool_spec(connector: Connector) -> dict[str, Any]:
+    """The destination URL is a credential, so it travels in the credentials map only."""
+    contract = connector.contract or {}
+    config = contract.get("config") or {}
+    options = contract.get("options") or {}
+    spec: dict[str, Any] = {
+        "id": str(connector.id),
+        "name": connector.name,
+        "kind": "notification",
+        "method": "POST",
+        "timeout_ms": options.get("timeout") or DEFAULT_TIMEOUT_MS,
+        "retries": options.get("retries") if options.get("retries") is not None else 0,
+        "body_params": list(config.get("bodyParams") or []),
     }
     if config.get("payload") is not None:
         spec["payload"] = config["payload"]

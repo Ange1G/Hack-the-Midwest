@@ -1,3 +1,4 @@
+import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -12,6 +13,11 @@ from app.domains.executions.models import AgentExecution, ExecutionStatus
 from app.domains.executions.repository import ExecutionRepository, is_terminal
 from app.domains.executions.schemas import ExecutionComplete, ExecutionCreate, ExecutionRead
 from app.domains.executions.tokens import callback_token_matches
+from app.domains.memory.repository import MemoryRepository
+from app.domains.memory.schemas import MemoryWrites
+from app.domains.memory.service import memory_enabled, stage_memory_writes
+
+logger = logging.getLogger(__name__)
 
 TerminalHook = Callable[[AgentExecution], Awaitable[None]]
 
@@ -23,10 +29,13 @@ class ExecutionService:
         agents: AgentRepository,
         *,
         terminal_hook: TerminalHook | None = None,
+        memory: MemoryRepository | None = None,
     ) -> None:
         self._executions = executions
         self._agents = agents
         self._terminal_hook = terminal_hook
+        # Must share the executions session so memory commits with the run's completion.
+        self._memory = memory
 
     def set_terminal_hook(self, hook: TerminalHook | None) -> None:
         self._terminal_hook = hook
@@ -119,10 +128,22 @@ class ExecutionService:
             if body.status == "succeeded"
             else ExecutionStatus.FAILED.value
         )
+        result = body.result
+        if body.memory is not None:
+            # Lock first so memory only commits with the callback that finishes the run.
+            locked = await self._executions.lock_if_running(execution_id)
+            if locked is None:
+                current = await self._executions.get_by_id(execution_id)
+                if current is None:
+                    raise NotFoundError("Execution not found")
+                return ExecutionRead.model_validate(current)
+            memory_writes = await self._stage_memory(locked, body.memory)
+            if memory_writes is not None:
+                result = {**(result or {}), "memory_writes": memory_writes}
         updated = await self._executions.complete_if_running(
             execution_id,
             status=status,
-            result=body.result,
+            result=result,
             error_code=body.error.code if body.error else None,
             error_message=body.error.message if body.error else None,
         )
@@ -130,6 +151,26 @@ class ExecutionService:
             raise NotFoundError("Execution not found")
         await self._notify_terminal(updated)
         return ExecutionRead.model_validate(updated)
+
+    async def _stage_memory(
+        self, execution: AgentExecution, writes: MemoryWrites
+    ) -> dict[str, list[str]] | None:
+        agent = await self._agents.get_owned(execution.owner_user_sso, execution.agent_id)
+        if agent is None or not memory_enabled(agent.configurations):
+            logger.warning(
+                "ignoring memory writes for agent without memory execution_id=%s",
+                execution.id,
+            )
+            return None
+        if self._memory is None:
+            logger.error("memory writes received but no memory repository execution_id=%s", execution.id)
+            return None
+        return await stage_memory_writes(
+            self._memory,
+            agent_id=agent.id,
+            owner_user_sso=execution.owner_user_sso,
+            writes=writes,
+        )
 
     async def _notify_terminal(self, execution: AgentExecution) -> None:
         if self._terminal_hook is None:
@@ -140,8 +181,12 @@ class ExecutionService:
 def agent_manifest(agent: Agent) -> dict[str, Any]:
     configurations = agent.configurations or {}
     primitives = configurations.get("primitives") or {}
-    return {
+    manifest: dict[str, Any] = {
         "title": agent.title,
         "system_prompt": agent.system_prompt,
         "connector_ids": list(primitives.keys()),
     }
+    output_schema = configurations.get("outputSchema")
+    if isinstance(output_schema, dict):
+        manifest["output_schema"] = output_schema
+    return manifest

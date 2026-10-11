@@ -24,6 +24,8 @@ class ExecutionRepository(Protocol):
 
     async def claim_next(self, token_hash: str) -> AgentExecution | None: ...
 
+    async def lock_if_running(self, execution_id: uuid.UUID) -> AgentExecution | None: ...
+
     async def complete_if_running(
         self,
         execution_id: uuid.UUID,
@@ -114,6 +116,19 @@ class SqlAlchemyExecutionRepository:
         await self._session.commit()
         await self._session.refresh(execution)
         return execution
+
+    async def lock_if_running(self, execution_id: uuid.UUID) -> AgentExecution | None:
+        """Row-lock a running execution until the session commits; None if not running."""
+        result = await self._session.execute(
+            select(AgentExecution)
+            .where(
+                AgentExecution.id == execution_id,
+                AgentExecution.status == ExecutionStatus.RUNNING.value,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
 
     async def complete_if_running(
         self,
