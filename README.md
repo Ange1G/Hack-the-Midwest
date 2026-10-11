@@ -1,4 +1,4 @@
-# Agent Platform
+# Stragents
 
 A multi-tenant platform for building, configuring, and running user-defined AI agents in isolated execution environments.
 
