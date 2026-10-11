@@ -9,10 +9,16 @@ import type {
 	ChainRunStep,
 	Connector,
 	ConnectorCreate,
+	ExecutionResult,
 	Finding,
 	HttpContract,
 	HttpContractInput,
 	HttpOptions,
+	Integration,
+	IntegrationInstall,
+	KnowledgeDocument,
+	KnowledgeDocumentCreate,
+	MemoryEntry,
 	Run,
 	RunEvent,
 	Webhook,
@@ -52,11 +58,16 @@ export type MockState = {
 	chainRuns: ChainRun[];
 	chainRunSteps: Map<string, ChainRunStep[]>;
 	ticks: Map<string, number>;
+	mcpTools: Map<string, string[]>;
+	knowledgeDocuments: KnowledgeDocument[];
+	memory: Map<string, MemoryEntry[]>;
 	counter: number;
 };
 
 function createState(): MockState {
 	return {
+		knowledgeDocuments: [],
+		memory: new Map(),
 		agents: [],
 		connectors: [],
 		runs: [],
@@ -68,6 +79,7 @@ function createState(): MockState {
 		chainRuns: [],
 		chainRunSteps: new Map(),
 		ticks: new Map(),
+		mcpTools: new Map(),
 		counter: 0,
 	};
 }
@@ -111,6 +123,29 @@ function storedContract(body: ConnectorCreate): Connector["contract"] {
 			...(Object.keys(credentials).length > 0 ? { credentials } : {}),
 		};
 	}
+	if (body.type === "notification") {
+		const masked: Record<string, string> = { webhookUrl: SECRET_PLACEHOLDER };
+		if (body.credentials.xApiKey) masked.xApiKey = SECRET_PLACEHOLDER;
+		if (body.credentials.authorizationHeader) {
+			masked.authorizationHeader = SECRET_PLACEHOLDER;
+		}
+		return {
+			type: "notification",
+			contractVersion: CONTRACT_VERSION,
+			name: body.name,
+			config: body.config,
+			credentials: masked,
+		};
+	}
+	if (body.type === "knowledge") {
+		return {
+			type: "knowledge",
+			contractVersion: CONTRACT_VERSION,
+			name: body.name,
+			...(body.description ? { description: body.description } : {}),
+			config: { maxResults: body.config.maxResults ?? 5 },
+		};
+	}
 	const credentials: Record<string, string> = {};
 	if (body.credentials?.xApiKey) credentials.xApiKey = SECRET_PLACEHOLDER;
 	if (body.credentials?.authorizationHeader) {
@@ -137,6 +172,10 @@ function storedContract(body: ConnectorCreate): Connector["contract"] {
 			...(body.config.payload !== undefined
 				? { payload: body.config.payload }
 				: {}),
+			...(body.config.queryParams
+				? { queryParams: body.config.queryParams }
+				: {}),
+			...(body.config.bodyParams ? { bodyParams: body.config.bodyParams } : {}),
 		},
 		...(Object.keys(credentials).length > 0 ? { credentials } : {}),
 		...(options ? { options } : {}),
@@ -173,6 +212,73 @@ export function createConnector(
 	return connector;
 }
 
+export function installIntegration(
+	owner_user_sso: string,
+	integration: Integration,
+	body: IntegrationInstall,
+): Connector {
+	const name = body.name ?? integration.connector_name;
+	if (
+		mockState.connectors.some(
+			(item) => item.owner_user_sso === owner_user_sso && item.name === name,
+		)
+	) {
+		const error = new Error("connector_name_taken") as Error & {
+			code: string;
+		};
+		error.code = "connector_name_taken";
+		throw error;
+	}
+	const timestamp = now();
+	const connector: Connector = {
+		id: nextId("con"),
+		owner_user_sso,
+		type: integration.connector_type,
+		name,
+		contract: {
+			type: integration.connector_type,
+			contractVersion: CONTRACT_VERSION,
+			name,
+			config: { URL: integration.url },
+			...(body.apiKey ? { credentials: { xApiKey: SECRET_PLACEHOLDER } } : {}),
+		},
+		created_at: timestamp,
+		updated_at: timestamp,
+	};
+	mockState.connectors.push(connector);
+	if (integration.connector_type === "mcp") {
+		mockState.mcpTools.set(connector.id, [...integration.tools]);
+	}
+	return connector;
+}
+
+export function addKnowledgeDocument(
+	connector: Connector,
+	body: KnowledgeDocumentCreate,
+): KnowledgeDocument {
+	const document: KnowledgeDocument = {
+		id: nextId("doc"),
+		connector_id: connector.id,
+		title: body.title,
+		size_bytes: new TextEncoder().encode(body.body).length,
+		excerpt: body.body.slice(0, 240),
+		created_at: now(),
+	};
+	mockState.knowledgeDocuments.push(document);
+	return document;
+}
+
+function capabilities(
+	configurations: AgentInput["configurations"],
+): Pick<AgentConfigurations, "memory" | "delegates"> {
+	return {
+		...(configurations.memory ? { memory: true } : {}),
+		...(configurations.delegates?.length
+			? { delegates: [...new Set(configurations.delegates)] }
+			: {}),
+	};
+}
+
 export function insertAgent(owner_user_sso: string, input: AgentInput): Agent {
 	const configurations: AgentConfigurations = {
 		primitives: input.configurations.primitives,
@@ -181,6 +287,10 @@ export function insertAgent(owner_user_sso: string, input: AgentInput): Agent {
 			: {}),
 		dayOfWeek: uniqueSorted(input.configurations.dayOfWeek),
 		timeOfDay: uniqueSorted(input.configurations.timeOfDay),
+		...(input.configurations.outputSchema
+			? { outputSchema: input.configurations.outputSchema }
+			: {}),
+		...capabilities(input.configurations),
 	};
 	const timestamp = now();
 	const agent: Agent = {
@@ -241,6 +351,10 @@ export function updateAgent(agent: Agent, patch: AgentUpdate): Agent {
 				: {}),
 			dayOfWeek: uniqueSorted(patch.configurations.dayOfWeek),
 			timeOfDay: uniqueSorted(patch.configurations.timeOfDay),
+			...(patch.configurations.outputSchema
+				? { outputSchema: patch.configurations.outputSchema }
+				: {}),
+			...capabilities(patch.configurations),
 		};
 	}
 	agent.updated_at = now();
@@ -318,9 +432,27 @@ export function runToCompletion(run: Run): void {
 	}
 }
 
+// A memory-enabled agent saves one key per run, as the real runner reports it.
+function rememberRun(agent: Agent, run: Run): ExecutionResult["memory_writes"] {
+	if (!agent.configurations.memory) return null;
+	const key = "last_run";
+	const entries = (mockState.memory.get(agent.id) ?? []).filter(
+		(entry) => entry.key !== key,
+	);
+	entries.push({ key, value: { run_id: run.id }, updated_at: now() });
+	mockState.memory.set(agent.id, entries);
+	return { set: [key], deleted: [], dropped: [] };
+}
+
 function finish(run: Run, agent: Agent, output: string): void {
 	run.status = "succeeded";
-	run.result = { output, model: "mock" };
+	const memoryWrites = rememberRun(agent, run);
+	run.result = {
+		output,
+		model: "mock",
+		tool_calls: run.result?.tool_calls ?? [],
+		...(memoryWrites ? { memory_writes: memoryWrites } : {}),
+	};
 	run.finished_at = now();
 	run.updated_at = run.finished_at;
 	pushEvent(run, "log", "Run finished");
@@ -395,7 +527,15 @@ export function advanceRun(run: Run): void {
 		run.result = {
 			output: null,
 			tool_calls: [
-				{ name, method: contract.method, URL: contract.URL, status: 200 },
+				{
+					name,
+					kind: "http",
+					ok: true,
+					duration_ms: 240,
+					method: contract.method,
+					URL: contract.URL,
+					status: "HTTP 200",
+				},
 			],
 		};
 		pushEvent(run, "tool_result", `${name} returned 200 OK`, {
@@ -517,6 +657,27 @@ export function chainRunSummary(run: ChainRun): ChainRun {
 	return summary;
 }
 
+function handoffInput(result: ExecutionResult | null | undefined): string {
+	const output = result?.output ?? "";
+	let text = `Previous step output:\n${output}`;
+	const calls = Array.isArray(result?.tool_calls) ? result.tool_calls : [];
+	const bodies: Array<{ name: string; body: string }> = [];
+	for (const call of calls) {
+		if (!call || typeof call !== "object") continue;
+		const record = call as Record<string, unknown>;
+		const body =
+			typeof record.response_body === "string" ? record.response_body : "";
+		if (!body.trim()) continue;
+		const name =
+			typeof record.name === "string" && record.name ? record.name : "tool";
+		bodies.push({ name, body });
+	}
+	if (bodies.length === 0) return text;
+	text += "\n\nPrevious step tool results:\n";
+	text += bodies.map((item) => `[${item.name}]\n${item.body}`).join("\n\n");
+	return text;
+}
+
 function advanceLinkedChain(execution: Run): void {
 	if (execution.status === "queued" || execution.status === "running") return;
 	for (const [runId, steps] of mockState.chainRunSteps) {
@@ -551,7 +712,7 @@ function advanceLinkedChain(execution: Run): void {
 				for (const skipped of later.slice(1)) skipped.status = "skipped";
 				return;
 			}
-			const handoff = `Previous step output:\n${execution.result?.output ?? ""}`;
+			const handoff = handoffInput(execution.result);
 			const nextExecution = createRun(agent, handoff);
 			nxt.status = "queued";
 			nxt.execution_id = nextExecution.id;

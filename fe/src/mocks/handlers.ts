@@ -5,15 +5,21 @@ import {
 	type Agent,
 	agentInputSchema,
 	agentUpdateSchema,
+	type Connector,
 	chainCreateSchema,
 	connectorCreateSchema,
 	connectorTypeCatalogSchema,
 	executionCreateSchema,
+	integrationInstallSchema,
+	knowledgeDocumentCreateSchema,
+	MAX_KNOWLEDGE_DOCUMENTS,
 	type Pagination,
 	type Run,
 	webhookCreateSchema,
 } from "#/lib/api/schemas";
+import { mockAgentTemplates, mockIntegrations } from "./catalog";
 import {
+	addKnowledgeDocument,
 	advanceChainRun,
 	advanceRun,
 	chainRunSummary,
@@ -23,6 +29,7 @@ import {
 	createRun,
 	createWebhook,
 	insertAgent,
+	installIntegration,
 	maskedWebhook,
 	mockState,
 	updateAgent,
@@ -134,6 +141,12 @@ function withLastRun(agent: Agent): Agent {
 function ownAgent(owner: string, id: string): Agent | undefined {
 	return mockState.agents.find(
 		(agent) => agent.id === id && agent.owner_user_sso === owner,
+	);
+}
+
+function ownConnector(owner: string, id: string): Connector | undefined {
+	return mockState.connectors.find(
+		(item) => item.id === id && item.owner_user_sso === owner,
 	);
 }
 
@@ -266,8 +279,200 @@ export const handlers = [
 					credential_fields: ["username", "password"],
 					config_schema: {},
 				},
+				{
+					type: "knowledge",
+					name: "Knowledge",
+					description: "Documents you upload that agents can search and quote.",
+					credential_fields: [],
+					config_schema: {},
+				},
 			]),
 		);
+	}),
+
+	http.get(url("/integrations"), ({ request }) => {
+		if (!caller(request)) return unauthorized();
+		return ok(mockIntegrations);
+	}),
+
+	http.post(
+		url("/integrations/:sso/:id/install"),
+		async ({ request, params }) => {
+			const owner = caller(request);
+			if (!owner) return unauthorized();
+			if (owner !== String(params.sso)) return forbidden();
+			const integration = mockIntegrations.find(
+				(item) => item.id === String(params.id),
+			);
+			if (!integration) return notFound();
+			const raw = await request.text();
+			const parsed = integrationInstallSchema.safeParse(
+				raw.trim() ? JSON.parse(raw) : {},
+			);
+			if (!parsed.success) return requestValidationError(parsed.error.issues);
+			if (integration.api_key_required && !parsed.data.apiKey) {
+				return fail(
+					422,
+					"api_key_required",
+					`${integration.name} needs an API key`,
+					{ errors: [{ field: "apiKey", message: "API key is required" }] },
+				);
+			}
+			try {
+				return ok(installIntegration(owner, integration, parsed.data), {
+					status: 201,
+				});
+			} catch (error) {
+				if (
+					error instanceof Error &&
+					"code" in error &&
+					error.code === "connector_name_taken"
+				) {
+					return fail(
+						409,
+						"connector_name_taken",
+						"You already have a connector with this name",
+					);
+				}
+				throw error;
+			}
+		},
+	),
+
+	http.get(url("/agent-templates"), ({ request }) => {
+		if (!caller(request)) return unauthorized();
+		return ok(mockAgentTemplates);
+	}),
+
+	http.get(url("/connectors/:sso/:id/documents"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const connector = ownConnector(owner, String(params.id));
+		if (!connector) return notFound();
+		return ok(
+			newestFirst(
+				mockState.knowledgeDocuments.filter(
+					(item) => item.connector_id === connector.id,
+				),
+			),
+		);
+	}),
+
+	http.post(
+		url("/connectors/:sso/:id/documents"),
+		async ({ request, params }) => {
+			const owner = caller(request);
+			if (!owner) return unauthorized();
+			if (owner !== String(params.sso)) return forbidden();
+			const connector = ownConnector(owner, String(params.id));
+			if (!connector) return notFound();
+			if (connector.type !== "knowledge") {
+				return fail(
+					422,
+					"connector_not_knowledge",
+					"Documents can only be added to knowledge connectors",
+				);
+			}
+			const parsed = knowledgeDocumentCreateSchema.safeParse(
+				await request.json(),
+			);
+			if (!parsed.success) return requestValidationError(parsed.error.issues);
+			const count = mockState.knowledgeDocuments.filter(
+				(item) => item.connector_id === connector.id,
+			).length;
+			if (count >= MAX_KNOWLEDGE_DOCUMENTS) {
+				return fail(
+					422,
+					"knowledge_limit_exceeded",
+					`A knowledge connector holds at most ${MAX_KNOWLEDGE_DOCUMENTS} documents`,
+					{ errors: [{ field: "body", message: "Document limit reached" }] },
+				);
+			}
+			return ok(addKnowledgeDocument(connector, parsed.data), { status: 201 });
+		},
+	),
+
+	http.delete(
+		url("/connectors/:sso/:id/documents/:documentId"),
+		({ request, params }) => {
+			const owner = caller(request);
+			if (!owner) return unauthorized();
+			if (owner !== String(params.sso)) return forbidden();
+			const connector = ownConnector(owner, String(params.id));
+			if (!connector) return notFound();
+			const before = mockState.knowledgeDocuments.length;
+			mockState.knowledgeDocuments = mockState.knowledgeDocuments.filter(
+				(item) =>
+					!(
+						item.id === String(params.documentId) &&
+						item.connector_id === connector.id
+					),
+			);
+			if (mockState.knowledgeDocuments.length === before) return notFound();
+			return new HttpResponse(null, { status: 204 });
+		},
+	),
+
+	http.get(url("/agents/:sso/:id/memory"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const agent = ownAgent(owner, String(params.id));
+		if (!agent) return notFound();
+		return ok(mockState.memory.get(agent.id) ?? []);
+	}),
+
+	http.delete(url("/agents/:sso/:id/memory"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const agent = ownAgent(owner, String(params.id));
+		if (!agent) return notFound();
+		mockState.memory.delete(agent.id);
+		return new HttpResponse(null, { status: 204 });
+	}),
+
+	http.delete(url("/agents/:sso/:id/memory/:key"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const agent = ownAgent(owner, String(params.id));
+		if (!agent) return notFound();
+		const entries = mockState.memory.get(agent.id) ?? [];
+		const remaining = entries.filter(
+			(entry) => entry.key !== String(params.key),
+		);
+		if (remaining.length === entries.length) return notFound();
+		mockState.memory.set(agent.id, remaining);
+		return new HttpResponse(null, { status: 204 });
+	}),
+
+	http.get(url("/connectors/:sso/:id/tools"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const connector = mockState.connectors.find(
+			(item) => item.id === String(params.id) && item.owner_user_sso === owner,
+		);
+		if (!connector) {
+			return fail(404, "not_found", "Connector not found");
+		}
+		if (connector.type !== "mcp") {
+			return fail(
+				422,
+				"connector_not_mcp",
+				"Tool preview is only available for MCP connectors",
+			);
+		}
+		const tools =
+			mockState.mcpTools.get(connector.id) ??
+			(["list_issues", "create_issue"] as const);
+		return ok({
+			connector_id: connector.id,
+			type: "mcp",
+			tools: [...tools],
+		});
 	}),
 
 	http.get(url("/connectors/:sso"), ({ request, params }) => {
@@ -310,6 +515,34 @@ export const handlers = [
 			}
 			throw error;
 		}
+	}),
+
+	http.delete(url("/connectors/:sso/:id"), ({ request, params }) => {
+		const owner = caller(request);
+		if (!owner) return unauthorized();
+		if (owner !== String(params.sso)) return forbidden();
+		const idx = mockState.connectors.findIndex(
+			(c) => c.id === String(params.id),
+		);
+		if (idx === -1) return notFound();
+		const connector = mockState.connectors[idx];
+		if (connector.owner_user_sso !== owner) return notFound();
+		mockState.connectors.splice(idx, 1);
+		mockState.knowledgeDocuments = mockState.knowledgeDocuments.filter(
+			(item) => item.connector_id !== connector.id,
+		);
+		// Detach from agents' configurations.primitives
+		for (const agent of mockState.agents) {
+			if (
+				agent.owner_user_sso === owner &&
+				connector.id in agent.configurations.primitives
+			) {
+				const { [connector.id]: _removed, ...rest } =
+					agent.configurations.primitives;
+				agent.configurations = { ...agent.configurations, primitives: rest };
+			}
+		}
+		return new Response(null, { status: 204 });
 	}),
 
 	http.get(url("/webhooks/:sso"), ({ request, params }) => {
