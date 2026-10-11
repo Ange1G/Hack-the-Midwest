@@ -37,6 +37,30 @@ describe("ConnectorForm", () => {
 		});
 	});
 
+	it("starts on the knowledge type and creates a knowledge connector", async () => {
+		signInAs();
+		const user = userEvent.setup();
+		const onCreated = vi.fn();
+		renderWithProviders(
+			<ConnectorForm initialType="knowledge" onCreated={onCreated} />,
+		);
+
+		expect(
+			await screen.findByRole("radio", { name: /knowledge/i }),
+		).toBeChecked();
+		await user.type(screen.getByLabelText(/^name$/i), "runbooks");
+		await user.click(screen.getByRole("button", { name: /create connector/i }));
+
+		await waitFor(() =>
+			expect(onCreated).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "knowledge", name: "runbooks" }),
+			),
+		);
+		expect(mockState.connectors[0]?.contract).toMatchObject({
+			config: { maxResults: 5 },
+		});
+	});
+
 	it("creates an HTTP connector and refuses a private URL", async () => {
 		signInAs();
 		const user = userEvent.setup();

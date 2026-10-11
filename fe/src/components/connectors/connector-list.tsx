@@ -3,6 +3,7 @@ import {
 	BellIcon,
 	BookOpenIcon,
 	DatabaseIcon,
+	FileTextIcon,
 	GlobeIcon,
 	type LucideIcon,
 	PlugIcon,
@@ -176,9 +177,21 @@ function ConnectorSections({ connectors }: { connectors: Connector[] }) {
 			id: "actions",
 			header: "",
 			enableSorting: false,
-			meta: { cellClassName: "w-10" },
+			meta: { cellClassName: "w-20" },
 			cell: ({ row }) => (
 				<DataTableActionsCell>
+					{row.original.type === "knowledge" ? (
+						<DataTableActionButton
+							label={`Manage documents in ${row.original.name}`}
+							icon={<FileTextIcon className="size-4" />}
+							asChild
+						>
+							<Link
+								to="/connectors/$connectorId"
+								params={{ connectorId: row.original.id }}
+							/>
+						</DataTableActionButton>
+					) : null}
 					<DataTableActionButton
 						label="Delete connector"
 						icon={<Trash2Icon className="size-4" />}
@@ -258,15 +271,34 @@ function ConnectorSections({ connectors }: { connectors: Connector[] }) {
 				title={filterLabel ? `${filterLabel} connectors` : "All connectors"}
 				count={shown.length}
 			>
-				<DataTable
-					columns={columns}
-					data={shown}
-					caption="Your connectors"
-					density="compact"
-					emptyMessage={
-						filterLabel ? `No ${filterLabel} connectors yet.` : undefined
-					}
-				/>
+				{filter === "knowledge" && shown.length === 0 ? (
+					<EmptyState
+						icon={<BookOpenIcon />}
+						title="No knowledge connectors yet"
+						description="A knowledge connector holds documents you upload. Agents it is attached to can search and read them."
+						action={
+							<Button asChild>
+								<Link
+									to="/connectors/new"
+									search={{ type: "knowledge" }}
+									className={buttonLinkClass}
+								>
+									New knowledge connector
+								</Link>
+							</Button>
+						}
+					/>
+				) : (
+					<DataTable
+						columns={columns}
+						data={shown}
+						caption="Your connectors"
+						density="compact"
+						emptyMessage={
+							filterLabel ? `No ${filterLabel} connectors yet.` : undefined
+						}
+					/>
+				)}
 			</ListSection>
 		</div>
 	);

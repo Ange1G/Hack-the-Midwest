@@ -28,12 +28,14 @@ const CONNECTOR_TYPES: readonly ConnectorType[] = [
 
 export function ConnectorForm({
 	onCreated,
+	initialType = "http",
 }: {
 	onCreated?: (connector: Connector) => void;
+	initialType?: ConnectorType;
 }) {
 	const catalog = useConnectorTypes();
 	const createConnector = useCreateConnector();
-	const [type, setType] = useState<ConnectorType>("http");
+	const [type, setType] = useState<ConnectorType>(initialType);
 	const [http, setHttp] = useState(emptyHttpDraft);
 	const [mcp, setMcp] = useState(emptyMcpDraft);
 	const [database, setDatabase] = useState(emptyDatabaseDraft);

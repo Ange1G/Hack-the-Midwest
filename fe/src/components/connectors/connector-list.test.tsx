@@ -64,6 +64,51 @@ describe("ConnectorList", () => {
 		).toBeInTheDocument();
 	});
 
+	it("links knowledge connectors to their documents page", async () => {
+		const owner = signInAs();
+		const knowledge = createConnector(owner.user_sso, {
+			type: "knowledge",
+			contractVersion: 1,
+			name: "runbooks",
+			config: { maxResults: 5 },
+		});
+		createConnector(owner.user_sso, {
+			type: "http",
+			contractVersion: 1,
+			name: "status",
+			config: { method: "GET", URL: "https://status.example.com" },
+		});
+		renderWithProviders(<ConnectorList />);
+
+		const table = await screen.findByRole("table");
+		const links = within(table).getAllByRole("link", {
+			name: /manage documents/i,
+		});
+		expect(links).toHaveLength(1);
+		expect(links[0]).toHaveAccessibleName("Manage documents in runbooks");
+		expect(links[0]).toHaveAttribute("href", `/connectors/${knowledge.id}`);
+	});
+
+	it("offers to create a knowledge connector when the Knowledge filter is empty", async () => {
+		const owner = signInAs();
+		createConnector(owner.user_sso, {
+			type: "http",
+			contractVersion: 1,
+			name: "status",
+			config: { method: "GET", URL: "https://status.example.com" },
+		});
+		const user = userEvent.setup();
+		renderWithProviders(<ConnectorList />);
+
+		await user.click(
+			await screen.findByRole("button", { name: "Knowledge connectors (0)" }),
+		);
+		expect(screen.getByText("No knowledge connectors yet")).toBeInTheDocument();
+		expect(
+			screen.getByRole("link", { name: "New knowledge connector" }),
+		).toHaveAttribute("href", "/connectors/new?type=knowledge");
+	});
+
 	it("deletes a connector row and removes it from the list", async () => {
 		const owner = signInAs();
 		createConnector(owner.user_sso, {

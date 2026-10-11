@@ -121,49 +121,56 @@ function KnowledgeDocuments({ connector }: { connector: Connector }) {
 	const maxResults = connectorConfigRecord(connector).maxResults;
 
 	return (
-		<div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_24rem]">
-			<Section
-				title="Documents"
-				description={
-					documents.data
-						? `${documents.data.length} of ${MAX_KNOWLEDGE_DOCUMENTS} · agents search them with ${connector.name}__search${typeof maxResults === "number" ? `, ${maxResults} results per search` : ""}`
-						: undefined
-				}
-				contentClassName="p-0"
-			>
-				{documents.isPending ? (
-					<div className="p-4">
-						<LoadingState label="Loading documents…" />
-					</div>
-				) : documents.isError ? (
-					<div className="p-4">
-						<ErrorState
-							title="Could not load documents"
-							error={documents.error}
-							onRetry={() => void documents.refetch()}
-						/>
-					</div>
-				) : documents.data.length === 0 ? (
-					<p className="p-4 text-sm text-muted-foreground">
-						No documents yet. Add notes, runbooks, or reference text, and agents
-						with this connector can search and quote them.
-					</p>
-				) : (
-					<ul className="divide-y">
-						{documents.data.map((document) => (
-							<DocumentRow
-								key={document.id}
-								connectorId={connector.id}
-								document={document}
+		<div className="space-y-4">
+			<p className="max-w-2xl text-sm text-muted-foreground">
+				Upload documents here, then attach{" "}
+				<code className="text-foreground">{connector.name}</code> to an agent
+				from its form ("Use existing") so the agent can search and read them.
+			</p>
+			<div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_24rem]">
+				<Section
+					title="Documents"
+					description={
+						documents.data
+							? `${documents.data.length} of ${MAX_KNOWLEDGE_DOCUMENTS} · agents search them with ${connector.name}__search${typeof maxResults === "number" ? `, ${maxResults} results per search` : ""}`
+							: undefined
+					}
+					contentClassName="p-0"
+				>
+					{documents.isPending ? (
+						<div className="p-4">
+							<LoadingState label="Loading documents…" />
+						</div>
+					) : documents.isError ? (
+						<div className="p-4">
+							<ErrorState
+								title="Could not load documents"
+								error={documents.error}
+								onRetry={() => void documents.refetch()}
 							/>
-						))}
-					</ul>
-				)}
-			</Section>
-			<AddDocumentForm
-				connectorId={connector.id}
-				full={(documents.data?.length ?? 0) >= MAX_KNOWLEDGE_DOCUMENTS}
-			/>
+						</div>
+					) : documents.data.length === 0 ? (
+						<p className="p-4 text-sm text-muted-foreground">
+							No documents yet. Add notes, runbooks, or reference text, and
+							agents with this connector can search and quote them.
+						</p>
+					) : (
+						<ul className="divide-y">
+							{documents.data.map((document) => (
+								<DocumentRow
+									key={document.id}
+									connectorId={connector.id}
+									document={document}
+								/>
+							))}
+						</ul>
+					)}
+				</Section>
+				<AddDocumentForm
+					connectorId={connector.id}
+					full={(documents.data?.length ?? 0) >= MAX_KNOWLEDGE_DOCUMENTS}
+				/>
+			</div>
 		</div>
 	);
 }
