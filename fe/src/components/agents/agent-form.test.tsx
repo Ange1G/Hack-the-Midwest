@@ -197,5 +197,12 @@ describe("AgentForm", () => {
 			await screen.findByText(/need at least one allowed tool/i),
 		).toBeInTheDocument();
 		expect(mockState.agents).toHaveLength(0);
+
+		await user.click(await screen.findByLabelText("list_issues"));
+		await user.click(screen.getByRole("button", { name: /create agent/i }));
+		await waitFor(() => expect(mockState.agents).toHaveLength(1));
+		expect(mockState.agents[0].configurations.primitives).toEqual({
+			[mockState.connectors[0].id]: { allowedTools: ["list_issues"] },
+		});
 	});
 });

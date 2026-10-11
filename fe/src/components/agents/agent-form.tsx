@@ -3,6 +3,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { LinkIcon, Loader2Icon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
+import { AgentCapabilitiesFields } from "#/components/agents/agent-capabilities";
+import {
+	McpAllowedToolsField,
+	parseAllowedTools,
+} from "#/components/agents/mcp-allowed-tools";
 import {
 	buildConnectorBody,
 	ConnectorDraftFields,
@@ -11,11 +16,14 @@ import {
 	emptyDatabaseDraft,
 	emptyHttpDraft,
 	emptyMcpDraft,
+	emptyNotificationDraft,
 	type HttpDraft,
 	type McpDraft,
+	type NotificationDraft,
 } from "#/components/connectors/connector-fields";
 import { FieldErrors, fieldErrorMessages } from "#/components/form-field";
 import { Section } from "#/components/layout/page";
+import { FieldError } from "#/components/schedule/field-error";
 import {
 	parseScheduleTimes,
 	type ScheduleDraft,
@@ -63,6 +71,7 @@ type Attachment = {
 	http: HttpDraft;
 	mcp: McpDraft;
 	database: DatabaseDraft;
+	notification: NotificationDraft;
 };
 
 let nextKey = 1;
@@ -75,7 +84,24 @@ const emptyAttachment = (mode: Attachment["mode"]): Attachment => ({
 	http: emptyHttpDraft(),
 	mcp: emptyMcpDraft(),
 	database: emptyDatabaseDraft(),
+	notification: emptyNotificationDraft(),
 });
+
+/** Starting values for a new agent, e.g. from a template. */
+export type AgentPreset = {
+	title: string;
+	systemPrompt: string;
+	memory: boolean;
+	attachments: Array<{ connectorId: string; allowedTools: string[] }>;
+};
+
+function attachmentsFromPreset(preset: AgentPreset): Attachment[] {
+	return preset.attachments.map(({ connectorId, allowedTools }) => ({
+		...emptyAttachment("library"),
+		connectorId,
+		allowedTools: allowedTools.join(", "),
+	}));
+}
 
 function attachmentsFromAgent(agent: Agent): Attachment[] {
 	return Object.entries(agent.configurations.primitives).map(
@@ -85,13 +111,6 @@ function attachmentsFromAgent(agent: Agent): Attachment[] {
 			allowedTools: reference.allowedTools?.join(", ") ?? "",
 		}),
 	);
-}
-
-function parseAllowedTools(value: string): string[] {
-	return value
-		.split(",")
-		.map((part) => part.trim())
-		.filter(Boolean);
 }
 
 function errorsForIndex(
@@ -117,6 +136,30 @@ function prefixErrors(
 	return prefixed;
 }
 
+const OUTPUT_SCHEMA_PLACEHOLDER = `{
+  "type": "object",
+  "required": ["summary"],
+  "properties": { "summary": { "type": "string" } }
+}`;
+
+// The API validates the schema itself; this only catches typos before saving.
+function parseOutputSchema(text: string): {
+	value?: Record<string, unknown>;
+	error?: string;
+} {
+	if (!text.trim()) return {};
+	let value: unknown;
+	try {
+		value = JSON.parse(text);
+	} catch {
+		return { error: "Output schema must be valid JSON" };
+	}
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		return { error: "Output schema must be a JSON object" };
+	}
+	return { value: value as Record<string, unknown> };
+}
+
 function patchAttachment(
 	attachments: Attachment[],
 	key: number,
@@ -130,17 +173,29 @@ function patchAttachment(
 export function AgentForm({
 	onSaved,
 	agent,
+	preset,
 }: {
 	onSaved?: (agent: Agent) => void;
 	agent?: Agent;
+	preset?: AgentPreset;
 }) {
 	const queryClient = useQueryClient();
 	const createAgent = useCreateAgent();
 	const updateAgent = useUpdateAgent();
 	const connectors = useConnectors();
 	const catalog = useConnectorTypes();
-	const [attachments, setAttachments] = useState<Attachment[]>(
-		agent ? attachmentsFromAgent(agent) : [],
+	const [attachments, setAttachments] = useState<Attachment[]>(() =>
+		agent
+			? attachmentsFromAgent(agent)
+			: preset
+				? attachmentsFromPreset(preset)
+				: [],
+	);
+	const [memory, setMemory] = useState(
+		agent?.configurations.memory ?? preset?.memory ?? false,
+	);
+	const [delegates, setDelegates] = useState<string[]>(
+		agent?.configurations.delegates ?? [],
 	);
 	const [schedule, setSchedule] = useState<ScheduleDraft>({
 		days: agent ? [...agent.configurations.dayOfWeek] : [],
@@ -159,6 +214,8 @@ export function AgentForm({
 	useEffect(() => {
 		if (!agent) return;
 		setAttachments(attachmentsFromAgent(agent));
+		setMemory(agent.configurations.memory ?? false);
+		setDelegates(agent.configurations.delegates ?? []);
 		setSchedule({
 			days: [...agent.configurations.dayOfWeek],
 			times: agent.configurations.timeOfDay.map(minutesToTime).join(", "),
@@ -171,8 +228,11 @@ export function AgentForm({
 
 	const form = useForm({
 		defaultValues: {
-			name: agent?.title ?? "",
-			instructions: agent?.system_prompt ?? "",
+			name: agent?.title ?? preset?.title ?? "",
+			instructions: agent?.system_prompt ?? preset?.systemPrompt ?? "",
+			outputSchema: agent?.configurations.outputSchema
+				? JSON.stringify(agent.configurations.outputSchema, null, 2)
+				: "",
 		},
 		onSubmit: async ({ value }) => {
 			if (!onSaved) return;
@@ -195,6 +255,7 @@ export function AgentForm({
 						attachment.http,
 						attachment.mcp,
 						attachment.database,
+						attachment.notification,
 					);
 					Object.assign(problems, prefixErrors(built.errors, index));
 					if (attachment.createType === "mcp" && tools.length === 0) {
@@ -232,6 +293,10 @@ export function AgentForm({
 
 			const times = parseScheduleTimes(schedule.times);
 			if (times.error) problems["schedule.times"] = times.error;
+			const outputSchema = parseOutputSchema(value.outputSchema);
+			if (outputSchema.error) {
+				problems["configurations.outputSchema"] = outputSchema.error;
+			}
 
 			const input: AgentInput = {
 				agentTitle: value.name.trim(),
@@ -241,6 +306,9 @@ export function AgentForm({
 					...(schedule.month ? { month: Number(schedule.month) } : {}),
 					dayOfWeek: [...schedule.days].sort((a, b) => a - b),
 					timeOfDay: times.timeOfDay,
+					...(outputSchema.value ? { outputSchema: outputSchema.value } : {}),
+					...(memory ? { memory: true } : {}),
+					...(delegates.length > 0 ? { delegates } : {}),
 				},
 			};
 			const parsedBasics = agentInputSchema
@@ -341,33 +409,25 @@ export function AgentForm({
 		attachment: Attachment,
 		idPrefix: string,
 		error: string | undefined,
+		connectorId?: string,
 	) => (
-		<div className="space-y-1.5">
-			<Label htmlFor={`${idPrefix}-tools`}>
-				Allowed tools (comma separated)
-			</Label>
-			<Input
-				id={`${idPrefix}-tools`}
-				placeholder="search_issues, get_issue"
-				className="font-mono text-xs"
-				value={attachment.allowedTools}
-				onChange={(event) =>
-					setAttachments((previous) =>
-						patchAttachment(previous, attachment.key, {
-							allowedTools: event.target.value,
-						}),
-					)
-				}
-				aria-invalid={Boolean(error)}
-			/>
-			{error ? <p className="text-sm text-destructive">{error}</p> : null}
-		</div>
+		<McpAllowedToolsField
+			connectorId={connectorId}
+			value={attachment.allowedTools}
+			onChange={(allowedTools) =>
+				setAttachments((previous) =>
+					patchAttachment(previous, attachment.key, { allowedTools }),
+				)
+			}
+			error={error}
+			idPrefix={idPrefix}
+		/>
 	);
 
 	return (
 		<form
 			noValidate
-			className="max-w-3xl space-y-6"
+			className="w-full space-y-6"
 			onSubmit={(event) => {
 				event.preventDefault();
 				event.stopPropagation();
@@ -424,6 +484,42 @@ export function AgentForm({
 					)}
 				</form.Field>
 			</Section>
+
+			<Section
+				title="Structured output"
+				description="Optional. A JSON Schema the agent's final reply must match. Runs whose reply does not match fail, and chains pass the validated JSON to the next step."
+				contentClassName="space-y-1.5"
+			>
+				<form.Field name="outputSchema">
+					{(field) => (
+						<>
+							<Label htmlFor="agent-output-schema">JSON Schema</Label>
+							<Textarea
+								id="agent-output-schema"
+								name={field.name}
+								rows={5}
+								spellCheck={false}
+								className="font-mono text-xs"
+								placeholder={OUTPUT_SCHEMA_PLACEHOLDER}
+								value={field.state.value}
+								onBlur={field.handleBlur}
+								onChange={(event) => field.handleChange(event.target.value)}
+								aria-invalid={Boolean(errors["configurations.outputSchema"])}
+							/>
+							<FieldError message={errors["configurations.outputSchema"]} />
+						</>
+					)}
+				</form.Field>
+			</Section>
+
+			<AgentCapabilitiesFields
+				agentId={agent?.id}
+				memory={memory}
+				onMemory={setMemory}
+				delegates={delegates}
+				onDelegates={setDelegates}
+				errors={errors}
+			/>
 
 			<Section
 				title="Connectors"
@@ -523,6 +619,14 @@ export function AgentForm({
 												http={attachment.http}
 												mcp={attachment.mcp}
 												database={attachment.database}
+												notification={attachment.notification}
+												onNotification={(notification) =>
+													setAttachments((previous) =>
+														patchAttachment(previous, attachment.key, {
+															notification,
+														}),
+													)
+												}
 												onHttp={(http) =>
 													setAttachments((previous) =>
 														patchAttachment(previous, attachment.key, { http }),
@@ -608,6 +712,7 @@ export function AgentForm({
 														attachment,
 														idPrefix,
 														fieldErrors.allowedTools,
+														connector.id,
 													)
 												: null}
 										</div>

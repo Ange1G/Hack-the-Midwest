@@ -10,6 +10,10 @@ import {
 	SettingsIcon,
 } from "lucide-react";
 import { type ReactNode, useEffect, useId, useState } from "react";
+import {
+	AgentDelegatesList,
+	AgentMemoryPanel,
+} from "#/components/agents/agent-memory";
 import { DataTable, type DataTableColumn } from "#/components/data-table";
 import {
 	DataTableActionButton,
@@ -203,6 +207,14 @@ export function AgentDetail({
 					<Section title="Schedule">
 						<ScheduleSummary configurations={data.configurations} />
 					</Section>
+
+					{data.configurations.delegates?.length ? (
+						<AgentDelegatesList delegateIds={data.configurations.delegates} />
+					) : null}
+
+					{data.configurations.memory ? (
+						<AgentMemoryPanel agentId={agentId} />
+					) : null}
 
 					<AgentRuns
 						runs={runs}
@@ -448,6 +460,12 @@ function CallSummary({
 	}
 	if (contract.options?.timeout != null) {
 		details.push(`${contract.options.timeout} ms timeout`);
+	}
+	if (contract.queryParams?.length) {
+		details.push(`Query params: ${contract.queryParams.join(", ")}`);
+	}
+	if (contract.bodyParams?.length) {
+		details.push(`Body params: ${contract.bodyParams.join(", ")}`);
 	}
 	return (
 		<ConnectorRow name={name}>
