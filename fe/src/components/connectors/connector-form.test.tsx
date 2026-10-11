@@ -7,6 +7,36 @@ import { signInAs } from "#/test/session";
 import { ConnectorForm } from "./connector-form";
 
 describe("ConnectorForm", () => {
+	it("creates an HTTP connector with query params", async () => {
+		signInAs();
+		const user = userEvent.setup();
+		renderWithProviders(<ConnectorForm onCreated={vi.fn()} />);
+
+		await user.type(await screen.findByLabelText(/^name$/i), "search");
+		await user.type(
+			screen.getByLabelText(/^url$/i),
+			"https://api.example.com/search",
+		);
+		await user.type(
+			screen.getByLabelText(/query parameters the agent may set/i),
+			"q, limit",
+		);
+		await user.click(screen.getByRole("button", { name: /create connector/i }));
+
+		await waitFor(() => expect(mockState.connectors).toHaveLength(1));
+		expect(mockState.connectors[0]).toMatchObject({
+			type: "http",
+			name: "search",
+			contract: {
+				config: {
+					method: "GET",
+					URL: "https://api.example.com/search",
+					queryParams: ["q", "limit"],
+				},
+			},
+		});
+	});
+
 	it("creates an HTTP connector and refuses a private URL", async () => {
 		signInAs();
 		const user = userEvent.setup();
@@ -45,6 +75,63 @@ describe("ConnectorForm", () => {
 			type: "mcp",
 			name: "linear",
 		});
+	});
+
+	it("creates a notification connector without storing the URL in plain text", async () => {
+		signInAs();
+		const user = userEvent.setup();
+		renderWithProviders(<ConnectorForm onCreated={vi.fn()} />);
+
+		await user.click(
+			await screen.findByRole("radio", { name: /notification/i }),
+		);
+		await user.type(screen.getByLabelText(/^name$/i), "slack_alerts");
+		await user.type(
+			screen.getByLabelText(/destination url/i),
+			"https://hooks.slack.com/services/T0/B0/notify-secret",
+		);
+		expect(screen.getByLabelText(/fields the agent fills/i)).toHaveValue(
+			"text",
+		);
+		await user.click(screen.getByRole("button", { name: /create connector/i }));
+
+		await waitFor(() => expect(mockState.connectors).toHaveLength(1));
+		expect(mockState.connectors[0]).toMatchObject({
+			type: "notification",
+			name: "slack_alerts",
+			contract: {
+				config: { bodyParams: ["text"] },
+				credentials: { webhookUrl: "********" },
+			},
+		});
+		expect(JSON.stringify(mockState.connectors[0])).not.toContain(
+			"notify-secret",
+		);
+	});
+
+	it("refuses a notification payload that fixes a field the agent fills", async () => {
+		signInAs();
+		const user = userEvent.setup();
+		renderWithProviders(<ConnectorForm onCreated={vi.fn()} />);
+
+		await user.click(
+			await screen.findByRole("radio", { name: /notification/i }),
+		);
+		await user.type(screen.getByLabelText(/^name$/i), "pager");
+		await user.type(
+			screen.getByLabelText(/destination url/i),
+			"https://events.example.com/hook",
+		);
+		await user.type(
+			screen.getByLabelText(/fixed fields/i),
+			'{{"text": "fixed"}',
+		);
+		await user.click(screen.getByRole("button", { name: /create connector/i }));
+
+		expect(
+			await screen.findByText(/already fixed in the payload: text/i),
+		).toBeInTheDocument();
+		expect(mockState.connectors).toHaveLength(0);
 	});
 
 	it("creates an external database connector", async () => {

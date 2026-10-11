@@ -1,7 +1,7 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import { createConnector } from "#/mocks/state";
+import { createConnector, mockState } from "#/mocks/state";
 import { renderWithProviders } from "#/test/render";
 import { signInAs } from "#/test/session";
 import { ConnectorList } from "./connector-list";
@@ -62,5 +62,26 @@ describe("ConnectorList", () => {
 		expect(
 			screen.getByRole("region", { name: "All connectors" }),
 		).toBeInTheDocument();
+	});
+
+	it("deletes a connector row and removes it from the list", async () => {
+		const owner = signInAs();
+		createConnector(owner.user_sso, {
+			type: "http",
+			contractVersion: 1,
+			name: "to-delete",
+			config: { method: "GET", URL: "https://example.com" },
+		});
+		const user = userEvent.setup();
+		renderWithProviders(<ConnectorList />);
+
+		const table = await screen.findByRole("table");
+		expect(within(table).getByText("to-delete")).toBeInTheDocument();
+
+		await user.click(
+			within(table).getByRole("button", { name: /delete connector/i }),
+		);
+
+		await waitFor(() => expect(mockState.connectors).toHaveLength(0));
 	});
 });

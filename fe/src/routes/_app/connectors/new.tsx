@@ -22,7 +22,16 @@ function NewConnectorPage() {
 					</Link>
 				}
 			/>
-			<ConnectorForm onCreated={() => void navigate({ to: "/connectors" })} />
+			<ConnectorForm
+				onCreated={(connector) =>
+					connector.type === "knowledge"
+						? void navigate({
+								to: "/connectors/$connectorId",
+								params: { connectorId: connector.id },
+							})
+						: void navigate({ to: "/connectors" })
+				}
+			/>
 		</>
 	);
 }

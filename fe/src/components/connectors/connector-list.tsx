@@ -1,25 +1,33 @@
 import { Link } from "@tanstack/react-router";
 import {
+	BellIcon,
+	BookOpenIcon,
 	DatabaseIcon,
 	GlobeIcon,
 	type LucideIcon,
 	PlugIcon,
 	ServerIcon,
+	Trash2Icon,
 } from "lucide-react";
 import { useState } from "react";
 import { DataTable, type DataTableColumn } from "#/components/data-table";
+import {
+	DataTableActionButton,
+	DataTableActionsCell,
+} from "#/components/data-table-action-button";
 import { ListSection } from "#/components/list/list-section";
 import { RelativeTime } from "#/components/relative-time";
 import { EmptyState, ErrorState, LoadingState } from "#/components/states";
 import { ToneBadge } from "#/components/tone-badge";
 import { Button } from "#/components/ui/button";
-import { useConnectors } from "#/lib/api/queries";
+import { useConnectors, useDeleteConnector } from "#/lib/api/queries";
 import {
 	type Connector,
 	type ConnectorType,
 	connectorConfigRecord,
 	connectorLabel,
 } from "#/lib/api/schemas";
+import { notify } from "#/lib/feedback";
 import { buttonLinkClass } from "#/lib/styles";
 import { cn } from "#/lib/utils";
 
@@ -31,6 +39,16 @@ const TYPE_CARDS: {
 	{ type: "http", icon: GlobeIcon, description: "GET and POST endpoints" },
 	{ type: "mcp", icon: ServerIcon, description: "Tools from your MCP servers" },
 	{ type: "database", icon: DatabaseIcon, description: "Database connections" },
+	{
+		type: "notification",
+		icon: BellIcon,
+		description: "Slack webhooks, pagers, alerts",
+	},
+	{
+		type: "knowledge",
+		icon: BookOpenIcon,
+		description: "Documents agents can search",
+	},
 ];
 
 // The non-secret address a connector points at, for scanning the list.
@@ -43,13 +61,19 @@ function connectorTarget(connector: Connector): string | null {
 	return null;
 }
 
-const columns: DataTableColumn<Connector>[] = [
+const baseColumns: DataTableColumn<Connector>[] = [
 	{
 		id: "name",
 		accessorFn: (row) => row.name,
 		header: "Name",
 		cell: ({ row }) => (
-			<span className="font-mono text-sm font-medium">{row.original.name}</span>
+			<Link
+				to="/connectors/$connectorId"
+				params={{ connectorId: row.original.id }}
+				className="rounded-sm font-mono text-sm font-medium underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+			>
+				{row.original.name}
+			</Link>
 		),
 	},
 	{
@@ -114,7 +138,7 @@ export function ConnectorList() {
 			<EmptyState
 				icon={<PlugIcon />}
 				title="No connectors yet"
-				description="Create an HTTP, MCP, or database connector, then attach it to an agent."
+				description="Install an integration above, or create an HTTP, MCP, database, or knowledge connector, then attach it to an agent."
 				action={
 					<Button asChild>
 						<Link to="/connectors/new" className={buttonLinkClass}>
@@ -131,10 +155,41 @@ export function ConnectorList() {
 
 function ConnectorSections({ connectors }: { connectors: Connector[] }) {
 	const [filter, setFilter] = useState<ConnectorType | null>(null);
+	const deleteConnector = useDeleteConnector();
 	const shown = filter
 		? connectors.filter((connector) => connector.type === filter)
 		: connectors;
 	const filterLabel = filter ? connectorLabel(filter) : null;
+
+	const isDeleting = (connector: Connector) =>
+		deleteConnector.isPending && deleteConnector.variables === connector.id;
+
+	const remove = (connector: Connector) =>
+		deleteConnector.mutate(connector.id, {
+			onSuccess: () => notify.success("Connector deleted"),
+			onError: (error) => notify.error("Could not delete the connector", error),
+		});
+
+	const columns: DataTableColumn<Connector>[] = [
+		...baseColumns,
+		{
+			id: "actions",
+			header: "",
+			enableSorting: false,
+			meta: { cellClassName: "w-10" },
+			cell: ({ row }) => (
+				<DataTableActionsCell>
+					<DataTableActionButton
+						label="Delete connector"
+						icon={<Trash2Icon className="size-4" />}
+						destructive
+						pending={isDeleting(row.original)}
+						onClick={() => remove(row.original)}
+					/>
+				</DataTableActionsCell>
+			),
+		},
+	];
 
 	return (
 		<div className="space-y-10">
@@ -154,21 +209,21 @@ function ConnectorSections({ connectors }: { connectors: Connector[] }) {
 					) : null
 				}
 			>
-				<ul className="grid gap-3 sm:grid-cols-3">
+				<ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
 					{TYPE_CARDS.map(({ type, icon: Icon, description }) => {
 						const count = connectors.filter(
 							(connector) => connector.type === type,
 						).length;
 						const active = filter === type;
 						return (
-							<li key={type}>
+							<li key={type} className="h-full">
 								<button
 									type="button"
 									aria-pressed={active}
 									aria-label={`${connectorLabel(type)} connectors (${count})`}
 									onClick={() => setFilter(active ? null : type)}
 									className={cn(
-										"flex w-full cursor-pointer items-start gap-3 rounded-lg border bg-card p-4 text-left outline-none transition-[border-color,box-shadow] duration-150",
+										"flex h-full w-full cursor-pointer items-start gap-3 rounded-lg border bg-card p-4 text-left outline-none transition-[border-color,box-shadow] duration-150",
 										"hover:border-foreground/20 hover:shadow-sm focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
 										"motion-safe:active:scale-[0.99]",
 										active && "border-foreground ring-1 ring-foreground",

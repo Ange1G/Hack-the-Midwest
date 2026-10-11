@@ -9,6 +9,7 @@ import {
 	connectorCreateSchema,
 	connectorLabel,
 	type HttpMethod,
+	MAX_KNOWLEDGE_RESULTS,
 } from "#/lib/api/schemas";
 import { CONTRACT_VERSION } from "#/lib/http-contract";
 import { cn } from "#/lib/utils";
@@ -22,6 +23,8 @@ export type HttpDraft = {
 	method: HttpMethod;
 	url: string;
 	payload: string;
+	queryParams: string;
+	bodyParams: string;
 	xApiKey: string;
 	authorizationHeader: string;
 };
@@ -46,12 +49,46 @@ export type DatabaseDraft = {
 	lifecycle: "agent" | "run";
 };
 
+export type NotificationDraft = {
+	name: string;
+	description: string;
+	webhookUrl: string;
+	bodyParams: string;
+	payload: string;
+	xApiKey: string;
+	authorizationHeader: string;
+};
+
+export const emptyNotificationDraft = (): NotificationDraft => ({
+	name: "",
+	description: "",
+	webhookUrl: "",
+	bodyParams: "text",
+	payload: "",
+	xApiKey: "",
+	authorizationHeader: "",
+});
+
+export type KnowledgeDraft = {
+	name: string;
+	description: string;
+	maxResults: string;
+};
+
+export const emptyKnowledgeDraft = (): KnowledgeDraft => ({
+	name: "",
+	description: "",
+	maxResults: "5",
+});
+
 export const emptyHttpDraft = (): HttpDraft => ({
 	name: "",
 	description: "",
 	method: "GET",
 	url: "",
 	payload: "",
+	queryParams: "",
+	bodyParams: "",
 	xApiKey: "",
 	authorizationHeader: "",
 });
@@ -76,6 +113,19 @@ export const emptyDatabaseDraft = (): DatabaseDraft => ({
 	lifecycle: "agent",
 });
 
+const HTTP_PARAM_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+
+export function parseParamList(value: string): string[] {
+	const names: string[] = [];
+	for (const part of value.split(",")) {
+		const name = part.trim();
+		if (!name) continue;
+		if (!HTTP_PARAM_NAME.test(name)) continue;
+		if (!names.includes(name)) names.push(name);
+	}
+	return names;
+}
+
 function fieldErrorsFromIssues(
 	issues: Array<{ path: PropertyKey[]; message: string }>,
 ): Record<string, string> {
@@ -92,10 +142,43 @@ export function buildConnectorBody(
 	http: HttpDraft,
 	mcp: McpDraft,
 	database: DatabaseDraft,
+	notification: NotificationDraft,
 ): { body?: ConnectorCreate; errors: Record<string, string> } {
 	const errors: Record<string, string> = {};
 	let candidate: unknown;
-	if (type === "http") {
+	if (type === "notification") {
+		let payload: unknown;
+		if (notification.payload.trim()) {
+			try {
+				payload = JSON.parse(notification.payload);
+			} catch {
+				errors["config.payload"] = "Payload must be valid JSON";
+			}
+		}
+		const bodyParams = parseParamList(notification.bodyParams);
+		if (bodyParams.length === 0) {
+			errors["config.bodyParams"] = "List at least one field, like text";
+		}
+		candidate = {
+			type: "notification",
+			contractVersion: CONTRACT_VERSION,
+			name: notification.name.trim(),
+			...(notification.description.trim()
+				? { description: notification.description.trim() }
+				: {}),
+			config: {
+				bodyParams,
+				...(payload !== undefined ? { payload } : {}),
+			},
+			credentials: {
+				webhookUrl: notification.webhookUrl.trim(),
+				...(notification.xApiKey ? { xApiKey: notification.xApiKey } : {}),
+				...(notification.authorizationHeader
+					? { authorizationHeader: notification.authorizationHeader }
+					: {}),
+			},
+		};
+	} else if (type === "http") {
 		let payload: unknown;
 		if (http.method === "POST" && http.payload.trim()) {
 			try {
@@ -103,6 +186,14 @@ export function buildConnectorBody(
 			} catch {
 				errors["config.payload"] = "Payload must be valid JSON";
 			}
+		}
+		const queryParams = parseParamList(http.queryParams);
+		const bodyParams = parseParamList(http.bodyParams);
+		if (http.queryParams.trim() && queryParams.length === 0) {
+			errors["config.queryParams"] = "Use names like q, limit";
+		}
+		if (http.bodyParams.trim() && bodyParams.length === 0) {
+			errors["config.bodyParams"] = "Use names like title, body";
 		}
 		const credentials: { xApiKey?: string; authorizationHeader?: string } = {};
 		if (http.xApiKey) credentials.xApiKey = http.xApiKey;
@@ -120,6 +211,8 @@ export function buildConnectorBody(
 				method: http.method,
 				URL: http.url.trim(),
 				...(payload !== undefined ? { payload } : {}),
+				...(queryParams.length > 0 ? { queryParams } : {}),
+				...(bodyParams.length > 0 ? { bodyParams } : {}),
 			},
 			...(Object.keys(credentials).length > 0 ? { credentials } : {}),
 		};
@@ -185,24 +278,53 @@ export function buildConnectorBody(
 	return { body: parsed.data, errors };
 }
 
+export function buildKnowledgeBody(draft: KnowledgeDraft): {
+	body?: ConnectorCreate;
+	errors: Record<string, string>;
+} {
+	const maxResults = Number(draft.maxResults);
+	const parsed = connectorCreateSchema.safeParse({
+		type: "knowledge",
+		contractVersion: CONTRACT_VERSION,
+		name: draft.name.trim(),
+		...(draft.description.trim()
+			? { description: draft.description.trim() }
+			: {}),
+		config: { maxResults },
+	});
+	if (!parsed.success) {
+		return { errors: fieldErrorsFromIssues(parsed.error.issues) };
+	}
+	return { body: parsed.data, errors: {} };
+}
+
+const DEFAULT_CONNECTOR_TYPES: readonly ConnectorType[] = [
+	"http",
+	"mcp",
+	"database",
+	"notification",
+];
+
 export function ConnectorTypePicker({
 	value,
 	onChange,
 	catalog,
 	name,
 	idPrefix,
+	types = DEFAULT_CONNECTOR_TYPES,
 }: {
 	value: ConnectorType;
 	onChange: (type: ConnectorType) => void;
 	catalog?: ConnectorTypeCatalog[];
 	name: string;
 	idPrefix: string;
+	types?: readonly ConnectorType[];
 }) {
 	return (
 		<fieldset className="space-y-3">
 			<legend className="text-sm font-medium">Connector type</legend>
-			<div className="grid gap-3 sm:grid-cols-3">
-				{(["http", "mcp", "database"] as const).map((option) => {
+			<div className="grid gap-3 sm:grid-cols-2">
+				{types.map((option) => {
 					const item = catalog?.find((entry) => entry.type === option);
 					const selected = value === option;
 					return (
@@ -245,9 +367,11 @@ export function ConnectorDraftFields({
 	http,
 	mcp,
 	database,
+	notification,
 	onHttp,
 	onMcp,
 	onDatabase,
+	onNotification,
 	errors,
 	idPrefix,
 }: {
@@ -255,12 +379,24 @@ export function ConnectorDraftFields({
 	http: HttpDraft;
 	mcp: McpDraft;
 	database: DatabaseDraft;
+	notification: NotificationDraft;
 	onHttp: (next: HttpDraft) => void;
 	onMcp: (next: McpDraft) => void;
 	onDatabase: (next: DatabaseDraft) => void;
+	onNotification: (next: NotificationDraft) => void;
 	errors: Record<string, string>;
 	idPrefix: string;
 }) {
+	if (type === "notification") {
+		return (
+			<NotificationFields
+				value={notification}
+				onChange={onNotification}
+				errors={errors}
+				idPrefix={idPrefix}
+			/>
+		);
+	}
 	if (type === "http") {
 		return (
 			<HttpFields
@@ -342,20 +478,57 @@ function HttpFields({
 					</select>
 				</div>
 			</div>
+			<div className="space-y-1.5">
+				<Label htmlFor={`${idPrefix}-query-params`}>
+					Query parameters the agent may set
+				</Label>
+				<Input
+					id={`${idPrefix}-query-params`}
+					placeholder="q, limit"
+					className="font-mono text-xs"
+					value={value.queryParams}
+					onChange={(event) => patch({ queryParams: event.target.value })}
+					aria-invalid={Boolean(errors["config.queryParams"])}
+					aria-describedby={`${idPrefix}-query-params-hint`}
+				/>
+				<p
+					id={`${idPrefix}-query-params-hint`}
+					className="text-xs text-muted-foreground"
+				>
+					Leave empty for a fixed URL. The agent cannot change the host or path.
+				</p>
+				<FieldError message={errors["config.queryParams"]} />
+			</div>
 			{value.method === "POST" ? (
-				<div className="space-y-1.5">
-					<Label htmlFor={`${idPrefix}-payload`}>Payload (JSON)</Label>
-					<Textarea
-						id={`${idPrefix}-payload`}
-						rows={3}
-						placeholder='{"text": "digest ready"}'
-						className="font-mono text-xs"
-						value={value.payload}
-						onChange={(event) => patch({ payload: event.target.value })}
-						aria-invalid={Boolean(errors["config.payload"])}
-					/>
-					<FieldError message={errors["config.payload"]} />
-				</div>
+				<>
+					<div className="space-y-1.5">
+						<Label htmlFor={`${idPrefix}-payload`}>Payload (JSON)</Label>
+						<Textarea
+							id={`${idPrefix}-payload`}
+							rows={3}
+							placeholder='{"text": "digest ready"}'
+							className="font-mono text-xs"
+							value={value.payload}
+							onChange={(event) => patch({ payload: event.target.value })}
+							aria-invalid={Boolean(errors["config.payload"])}
+						/>
+						<FieldError message={errors["config.payload"]} />
+					</div>
+					<div className="space-y-1.5">
+						<Label htmlFor={`${idPrefix}-body-params`}>
+							Body fields the agent may set
+						</Label>
+						<Input
+							id={`${idPrefix}-body-params`}
+							placeholder="title, body"
+							className="font-mono text-xs"
+							value={value.bodyParams}
+							onChange={(event) => patch({ bodyParams: event.target.value })}
+							aria-invalid={Boolean(errors["config.bodyParams"])}
+						/>
+						<FieldError message={errors["config.bodyParams"]} />
+					</div>
+				</>
 			) : null}
 			<HeaderCredentials
 				xApiKey={value.xApiKey}
@@ -402,6 +575,98 @@ function McpFields({
 					aria-invalid={Boolean(errors["config.URL"])}
 				/>
 				<FieldError message={errors["config.URL"]} />
+			</div>
+			<HeaderCredentials
+				xApiKey={value.xApiKey}
+				authorizationHeader={value.authorizationHeader}
+				onChange={patch}
+				errors={errors}
+				idPrefix={idPrefix}
+			/>
+		</div>
+	);
+}
+
+function NotificationFields({
+	value,
+	onChange,
+	errors,
+	idPrefix,
+}: {
+	value: NotificationDraft;
+	onChange: (next: NotificationDraft) => void;
+	errors: Record<string, string>;
+	idPrefix: string;
+}) {
+	const patch = (partial: Partial<NotificationDraft>) =>
+		onChange({ ...value, ...partial });
+	return (
+		<div className="space-y-4">
+			<NameFields
+				name={value.name}
+				description={value.description}
+				onName={(name) => patch({ name })}
+				onDescription={(description) => patch({ description })}
+				errors={errors}
+				idPrefix={idPrefix}
+			/>
+			<div className="space-y-1.5">
+				<Label htmlFor={`${idPrefix}-webhook-url`}>Destination URL</Label>
+				<Input
+					id={`${idPrefix}-webhook-url`}
+					type="url"
+					autoComplete="off"
+					spellCheck={false}
+					placeholder="https://hooks.slack.com/services/…"
+					value={value.webhookUrl}
+					onChange={(event) => patch({ webhookUrl: event.target.value })}
+					aria-invalid={Boolean(errors["credentials.webhookUrl"])}
+					aria-describedby={`${idPrefix}-webhook-url-hint`}
+				/>
+				<p
+					id={`${idPrefix}-webhook-url-hint`}
+					className="text-xs text-muted-foreground"
+				>
+					Stored encrypted and never shown again. The agent only sees the host.
+				</p>
+				<FieldError message={errors["credentials.webhookUrl"]} />
+			</div>
+			<div className="space-y-1.5">
+				<Label htmlFor={`${idPrefix}-body-params`}>
+					Fields the agent fills
+				</Label>
+				<Input
+					id={`${idPrefix}-body-params`}
+					placeholder="text"
+					className="font-mono text-xs"
+					value={value.bodyParams}
+					onChange={(event) => patch({ bodyParams: event.target.value })}
+					aria-invalid={Boolean(errors["config.bodyParams"])}
+					aria-describedby={`${idPrefix}-body-params-hint`}
+				/>
+				<p
+					id={`${idPrefix}-body-params-hint`}
+					className="text-xs text-muted-foreground"
+				>
+					Slack incoming webhooks need <code>text</code>. Separate names with
+					commas.
+				</p>
+				<FieldError message={errors["config.bodyParams"]} />
+			</div>
+			<div className="space-y-1.5">
+				<Label htmlFor={`${idPrefix}-payload`}>
+					Fixed fields (JSON, optional)
+				</Label>
+				<Textarea
+					id={`${idPrefix}-payload`}
+					rows={3}
+					placeholder='{"username": "Agent"}'
+					className="font-mono text-xs"
+					value={value.payload}
+					onChange={(event) => patch({ payload: event.target.value })}
+					aria-invalid={Boolean(errors["config.payload"])}
+				/>
+				<FieldError message={errors["config.payload"]} />
 			</div>
 			<HeaderCredentials
 				xApiKey={value.xApiKey}
@@ -540,6 +805,56 @@ function DatabaseFields({
 					</select>
 				</div>
 			)}
+		</div>
+	);
+}
+
+export function KnowledgeFields({
+	value,
+	onChange,
+	errors,
+	idPrefix,
+}: {
+	value: KnowledgeDraft;
+	onChange: (next: KnowledgeDraft) => void;
+	errors: Record<string, string>;
+	idPrefix: string;
+}) {
+	const patch = (partial: Partial<KnowledgeDraft>) =>
+		onChange({ ...value, ...partial });
+	return (
+		<div className="space-y-4">
+			<NameFields
+				name={value.name}
+				description={value.description}
+				onName={(name) => patch({ name })}
+				onDescription={(description) => patch({ description })}
+				errors={errors}
+				idPrefix={idPrefix}
+			/>
+			<div className="space-y-1.5">
+				<Label htmlFor={`${idPrefix}-max-results`}>Results per search</Label>
+				<Input
+					id={`${idPrefix}-max-results`}
+					type="number"
+					inputMode="numeric"
+					min={1}
+					max={MAX_KNOWLEDGE_RESULTS}
+					className="w-28"
+					value={value.maxResults}
+					onChange={(event) => patch({ maxResults: event.target.value })}
+					aria-invalid={Boolean(errors["config.maxResults"])}
+					aria-describedby={`${idPrefix}-max-results-hint`}
+				/>
+				<p
+					id={`${idPrefix}-max-results-hint`}
+					className="text-xs text-muted-foreground"
+				>
+					Passages the agent gets back per search, 1 to {MAX_KNOWLEDGE_RESULTS}.
+					Add documents after you create the connector.
+				</p>
+				<FieldError message={errors["config.maxResults"]} />
+			</div>
 		</div>
 	);
 }
