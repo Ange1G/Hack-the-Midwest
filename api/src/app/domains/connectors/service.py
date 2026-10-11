@@ -11,7 +11,12 @@ from app.core.secrets import SecretCipher
 from app.domains.connectors.models import Connector, ConnectorSecret
 from app.domains.connectors.repository import ConnectorNameTaken, ConnectorRepository
 from app.domains.connectors.schemas import ConnectorRead
-from app.domains.primitives.registry import CONNECTORS, parse_contract, split_credentials
+from app.domains.primitives.registry import (
+    CONNECTORS,
+    NESTED_TAGS,
+    parse_contract,
+    split_credentials,
+)
 
 
 class ConnectorService:
@@ -35,7 +40,9 @@ class ConnectorService:
                 message="Connector contract is invalid",
                 status_code=422,
                 details={
-                    "errors": describe_validation_errors(exc, tags=CONNECTORS, root_field="type")
+                    "errors": describe_validation_errors(
+                        exc, tags=CONNECTORS, nested_tags=NESTED_TAGS, root_field="type"
+                    )
                 },
             ) from None
 

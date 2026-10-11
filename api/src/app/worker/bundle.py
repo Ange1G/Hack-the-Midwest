@@ -9,7 +9,8 @@ from typing import Any
 from app.core.config import Settings
 from app.core.secrets import SecretCipher
 from app.domains.agents.models import Agent
-from app.domains.connectors.models import Connector, ConnectorSecret
+from app.domains.connectors.models import Connector
+from app.domains.connectors.repository import ConnectorWithSecrets
 
 DEFAULT_TIMEOUT_MS = 10_000
 
@@ -59,11 +60,11 @@ def referenced_connector_ids(agent: Agent) -> list[uuid.UUID]:
 
 def build_http_tool_bundle(
     agent: Agent,
-    owned: list[tuple[Connector, list[ConnectorSecret]]],
+    owned: list[ConnectorWithSecrets],
     cipher: SecretCipher | None,
 ) -> HttpToolBundle:
     requested = referenced_connector_ids(agent)
-    by_id = {connector.id: (connector, secrets) for connector, secrets in owned}
+    by_id = {item.connector.id: item for item in owned}
     if any(connector_id not in by_id for connector_id in requested):
         # Same message for missing and another tenant's id (do not leak existence).
         raise BundleBuildError("connector_missing", "Connector not found")
@@ -71,25 +72,28 @@ def build_http_tool_bundle(
     tools: list[dict[str, Any]] = []
     credentials: dict[str, dict[str, str]] = {}
     for connector_id in requested:
-        connector, secrets = by_id[connector_id]
+        loaded = by_id[connector_id]
+        connector = loaded.connector
         if connector.type != "http":
             continue
-        decrypted = _decrypt_secrets(secrets, cipher) if secrets else {}
+        decrypted = (
+            _decrypt_ciphertexts(loaded.ciphertexts, cipher) if loaded.ciphertexts else {}
+        )
         tools.append(_http_tool_spec(connector))
         if decrypted:
             credentials[str(connector.id)] = decrypted
     return HttpToolBundle(tools=tools, credentials=credentials)
 
 
-def _decrypt_secrets(
-    secrets: list[ConnectorSecret], cipher: SecretCipher | None
+def _decrypt_ciphertexts(
+    ciphertexts: dict[str, str], cipher: SecretCipher | None
 ) -> dict[str, str]:
     if cipher is None:
         raise BundleBuildError(
             "secret_storage_unavailable",
             "Credential storage is not configured on this server",
         )
-    return {secret.field_name: cipher.decrypt(secret.ciphertext) for secret in secrets}
+    return {field: cipher.decrypt(value) for field, value in ciphertexts.items()}
 
 
 def _http_tool_spec(connector: Connector) -> dict[str, Any]:

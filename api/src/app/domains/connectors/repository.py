@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Collection
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from sqlalchemy import func, select
@@ -14,6 +15,14 @@ class ConnectorNameTaken(Exception):
     """The owner already has a connector with this name."""
 
 
+@dataclass(frozen=True)
+class ConnectorWithSecrets:
+    """A connector and its encrypted credentials, for code that executes connectors."""
+
+    connector: Connector
+    ciphertexts: dict[str, str] = field(repr=False)  # field name -> Fernet ciphertext
+
+
 class ConnectorRepository(Protocol):
     async def list_by_owner(
         self, owner_user_sso: str, *, page: int, page_size: int
@@ -25,9 +34,9 @@ class ConnectorRepository(Protocol):
         self, owner_user_sso: str, ids: Collection[uuid.UUID]
     ) -> dict[uuid.UUID, str]: ...
 
-    async def owned_with_secrets(
+    async def get_with_secrets(
         self, owner_user_sso: str, ids: Collection[uuid.UUID]
-    ) -> list[tuple[Connector, list[ConnectorSecret]]]: ...
+    ) -> list[ConnectorWithSecrets]: ...
 
 
 class SqlAlchemyConnectorRepository:
@@ -81,26 +90,31 @@ class SqlAlchemyConnectorRepository:
         )
         return {row.id: row.type for row in result}
 
-    async def owned_with_secrets(
+    async def get_with_secrets(
         self, owner_user_sso: str, ids: Collection[uuid.UUID]
-    ) -> list[tuple[Connector, list[ConnectorSecret]]]:
-        """Connectors the owner actually owns, each with its encrypted secret rows."""
+    ) -> list[ConnectorWithSecrets]:
+        """The owner's connectors among `ids` with their ciphertexts; others are absent."""
         if not ids:
             return []
-        result = await self._session.execute(
-            select(Connector).where(
-                Connector.owner_user_sso == owner_user_sso, Connector.id.in_(ids)
+        connectors = list(
+            (
+                await self._session.execute(
+                    select(Connector)
+                    .where(Connector.owner_user_sso == owner_user_sso, Connector.id.in_(ids))
+                    .order_by(Connector.name)
+                )
             )
+            .scalars()
+            .all()
         )
-        connectors = list(result.scalars().all())
         if not connectors:
             return []
-        secret_rows = await self._session.execute(
+        rows = await self._session.execute(
             select(ConnectorSecret).where(
                 ConnectorSecret.connector_id.in_([c.id for c in connectors])
             )
         )
-        by_connector: dict[uuid.UUID, list[ConnectorSecret]] = {c.id: [] for c in connectors}
-        for secret in secret_rows.scalars().all():
-            by_connector[secret.connector_id].append(secret)
-        return [(connector, by_connector[connector.id]) for connector in connectors]
+        ciphertexts: dict[uuid.UUID, dict[str, str]] = {}
+        for secret in rows.scalars():
+            ciphertexts.setdefault(secret.connector_id, {})[secret.field_name] = secret.ciphertext
+        return [ConnectorWithSecrets(c, ciphertexts.get(c.id, {})) for c in connectors]

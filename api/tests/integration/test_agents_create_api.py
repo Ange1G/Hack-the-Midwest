@@ -98,7 +98,6 @@ async def test_agent_without_connectors_is_allowed(client: AsyncClient) -> None:
     response = await client.post(AGENTS_URL, json=agent_body({}), headers=AUTH)
     assert response.status_code == 201
 
-
 async def test_referencing_another_users_connector_is_rejected(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:

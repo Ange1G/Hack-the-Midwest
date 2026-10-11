@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     # (e.g. Zscaler / Netskope) or uses private CA roots not in the runner image.
     # Leave unset in standard production environments.
     execution_ssl_ca_bundle: str | None = None
+    # Docker network for provisioned databases. Unset: ports are published on 127.0.0.1
+    # (local development, platform code on the Docker host). Set: databases join this
+    # network (created as --internal if missing) and are reached by container name.
+    database_provisioner_network: str | None = None
+    # Seconds to wait for a provisioned database to accept connections.
+    database_provisioner_ready_timeout: int = 90
 
     @field_validator("cors_origins", mode="before")
     @classmethod

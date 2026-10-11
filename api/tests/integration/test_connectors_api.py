@@ -153,7 +153,7 @@ async def test_connector_types_catalog(client: AsyncClient) -> None:
     response = await client.get("/api/v1/connector-types", headers=AUTH)
     assert response.status_code == 200
     types = {item["type"]: item for item in response.json()["data"]}
-    assert set(types) == {"http", "mcp"}
+    assert set(types) == {"http", "mcp", "database"}
     assert types["mcp"]["credential_fields"] == ["xApiKey", "authorizationHeader"]
     assert "config" in types["mcp"]["config_schema"]["required"]
     assert (await client.get("/api/v1/connector-types")).status_code == 401

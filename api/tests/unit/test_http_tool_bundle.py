@@ -5,7 +5,8 @@ import pytest
 
 from app.core.secrets import SecretCipher
 from app.domains.agents.models import Agent
-from app.domains.connectors.models import Connector, ConnectorSecret
+from app.domains.connectors.models import Connector
+from app.domains.connectors.repository import ConnectorWithSecrets
 from app.worker.bundle import BundleBuildError, build_http_tool_bundle
 
 HTTP_ID = uuid.uuid4()
@@ -26,7 +27,7 @@ def _agent(*ids: uuid.UUID) -> Agent:
     )
 
 
-def _http(cipher: SecretCipher | None = None, *, with_secret: bool = False) -> tuple[Connector, list[ConnectorSecret]]:
+def _http(cipher: SecretCipher | None = None, *, with_secret: bool = False) -> ConnectorWithSecrets:
     connector = Connector(
         id=HTTP_ID,
         owner_user_sso="sso-me",
@@ -39,21 +40,15 @@ def _http(cipher: SecretCipher | None = None, *, with_secret: bool = False) -> t
             "options": {"timeout": 5000, "retries": 1},
         },
     )
-    secrets: list[ConnectorSecret] = []
+    ciphertexts: dict[str, str] = {}
     if with_secret:
         assert cipher is not None
-        secrets = [
-            ConnectorSecret(
-                connector_id=HTTP_ID,
-                field_name="xApiKey",
-                ciphertext=cipher.encrypt("key-live"),
-            )
-        ]
-    return connector, secrets
+        ciphertexts = {"xApiKey": cipher.encrypt("key-live")}
+    return ConnectorWithSecrets(connector, ciphertexts)
 
 
-def _mcp() -> tuple[Connector, list[ConnectorSecret]]:
-    return (
+def _mcp() -> ConnectorWithSecrets:
+    return ConnectorWithSecrets(
         Connector(
             id=MCP_ID,
             owner_user_sso="sso-me",
@@ -61,7 +56,7 @@ def _mcp() -> tuple[Connector, list[ConnectorSecret]]:
             name="linear",
             contract={"type": "mcp", "name": "linear", "config": {"URL": "https://mcp.example.com"}},
         ),
-        [],
+        {},
     )
 
 

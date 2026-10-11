@@ -153,7 +153,7 @@ async def _http_bundle(
     settings: Settings,
 ) -> HttpToolBundle:
     ids = referenced_connector_ids(agent)
-    owned = await connectors.owned_with_secrets(agent.owner_user_sso, ids)
+    owned = await connectors.get_with_secrets(agent.owner_user_sso, ids)
     return build_http_tool_bundle(agent, owned, cipher_from_settings(settings))
 
 

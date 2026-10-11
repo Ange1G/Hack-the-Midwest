@@ -223,3 +223,91 @@ full rationale and the production setup guide.
 3. Enqueue: `POST /api/v1/agents/{sso}/{agentId}/executions` → `202` + execution id.
 4. Poll: `GET /api/v1/agents/{sso}/executions/{executionId}` until `succeeded` or `failed`.
 5. `data.result.output` is the model text; `data.result.tool_calls` lists HTTP tools used.
+
+## Database connectors
+
+`type: "database"` follows the same generic contract. `config.mode` picks how the
+database is reached.
+
+**External** (a database you run; TLS is required, access is `readOnly` by default):
+
+```json
+{
+  "type": "database",
+  "contractVersion": 1,
+  "name": "orders_db",
+  "description": "Orders read replica. Tables: orders, customers.",
+  "credentials": { "username": "agent_reader", "password": "<password>" },
+  "config": {
+    "mode": "external",
+    "engine": "postgres",
+    "host": "db.example.com",
+    "port": 5432,
+    "database": "orders",
+    "tls": "verifyFull",
+    "access": "readOnly"
+  }
+}
+```
+
+**Provisioned** (the platform starts the database when the agent's run starts):
+
+```json
+{
+  "type": "database",
+  "contractVersion": 1,
+  "name": "scratch",
+  "description": "The agent's own database for notes and results.",
+  "config": {
+    "mode": "provisioned",
+    "engine": "postgres",
+    "version": "16",
+    "database": "agent",
+    "lifecycle": "agent",
+    "memoryMb": 512
+  }
+}
+```
+
+| engine | external default port | provisioned versions (default) |
+| --- | --- | --- |
+| `postgres` | 5432 | 15, 16, 17 (16) |
+| `mysql` | 3306 | 8.0, 8.4 (8.4); `memoryMb` at least 512 |
+| `mongodb` | 27017 | 7.0, 8.0 (8.0); `memoryMb` at least 512 |
+| `redis` | 6379 | 7; no `database` or `username` |
+
+- `lifecycle: "agent"` keeps the database and its data between runs; `"run"` starts an
+  empty one for every run and deletes it when the run ends.
+- Provisioned `credentials` are optional. Without them the platform generates the
+  password (derived from `SECRETS_ENCRYPTION_KEY` for `agent` databases, random for
+  `run` databases).
+- External hosts must be public, like HTTP and MCP URLs. For a database on your own
+  machine, use a provisioned one instead. Linode/Akamai managed databases work as
+  external databases (paste the CA certificate into `caCertificate`).
+- Give external databases a read-only database user when the agent only reads.
+
+Agents reference database connectors like HTTP ones: `"primitives": { "<id>": {} }`.
+
+### Try provisioning without a run
+
+Agent runs (worker) call `app.runtime.agent_databases.agent_databases()` when they start.
+Until the worker exists, this command does the same for one agent (Docker must be running):
+
+```bash
+uv run python -m app.runtime.databases_cli up <agent id>                    # Ctrl+C ends the "run"
+uv run python -m app.runtime.databases_cli up <agent id> --show-passwords   # print passwords in URLs
+uv run python -m app.runtime.databases_cli stop <agent id>                  # stop, keep data
+uv run python -m app.runtime.databases_cli remove <agent id>                # delete with data
+```
+
+The first start of an engine pulls its image, which can take a minute.
+
+Containers are named `cdb-<agent>-<connector>`, labelled `constitution.*`, limited to
+`memoryMb`, 1 CPU and 256 processes, run with `no-new-privileges`, and published on
+127.0.0.1 only. List them with `docker ps --filter label=constitution.managed=database`.
+
+Tests against real images (opt-in, pulls images):
+
+```bash
+RUN_DOCKER_TESTS=1 uv run pytest tests/docker -v           # PowerShell: $env:RUN_DOCKER_TESTS=1; uv run pytest tests/docker -v
+```
